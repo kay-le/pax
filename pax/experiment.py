@@ -3,6 +3,12 @@ import os
 from datetime import datetime
 from functools import partial
 
+# Keep matplotlib cache/config in a writable local folder.
+if "MPLCONFIGDIR" not in os.environ:
+    os.environ["MPLCONFIGDIR"] = os.path.join(
+        os.getcwd(), ".matplotlib"
+    )
+
 import gymnax
 import hydra
 import jax
