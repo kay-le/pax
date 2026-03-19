@@ -4,13 +4,13 @@ chex
 distrax
 dm-haiku
 dm-tree
-evosax
+evosax==0.1.6
 flax
 gymnax
 hydra-core
 isort
-jax
-jaxlib
+jax==0.8.2+computecanada
+jaxlib==0.8.2+computecanada
 numpy
 optax
 pytest

@@ -10,7 +10,8 @@ import jax.numpy as jnp
 import omegaconf
 import wandb
 from evosax import CMA_ES, PGPE, OpenES, ParameterReshaper, SimpleGA
-from jax.lib import xla_bridge
+#from jax.lib import xla_bridge
+import jax.extend
 
 from pax.agents.hyper.ppo import make_hyper
 from pax.agents.lola.lola import make_lola
@@ -482,7 +483,7 @@ def agent_setup(args, env, env_params, logger):
     ):
         obs_shape = env.observation_space(env_params).n
     elif args.env_id == "InTheMatrix":
-        obs_shape = jax.tree_map(
+        obs_shape = jax.tree_util.tree_map(
             lambda x: x.shape, env.observation_space(env_params)
         )
     else:
@@ -853,7 +854,7 @@ def watcher_setup(args, logger):
 
 @hydra.main(config_path="conf", config_name="config", version_base="1.1")
 def main(args):
-    print(f"Jax backend: {xla_bridge.get_backend().platform}")
+    print(f"Jax backend: {jax.extend.backend.get_backend().platform}")
 
     """Set up main."""
     logger = logging.getLogger()

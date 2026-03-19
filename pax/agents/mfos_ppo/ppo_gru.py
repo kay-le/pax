@@ -391,7 +391,7 @@ class PPO(AgentInterface):
             key, subkey = jax.random.split(key)
 
             if isinstance(obs_spec, dict):
-                # dummy_obs = jax.tree_map(lambda x: jnp.zeros(x), obs_spec)
+                # dummy_obs = jax.tree_util.tree_map(lambda x: jnp.zeros(x), obs_spec)
                 dummy_obs = {
                     "inventory": jnp.zeros(obs_spec["inventory"]),
                     "observation": jnp.zeros(obs_spec["observation"]),
