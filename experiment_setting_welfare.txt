@@ -1,0 +1,137 @@
+Welfare-Maximising Opponent Shaping — Full Experiment Design
+=============================================================
+
+Goal: Train welfare-maximising meta-agents with IR constraints (Lagrangian dual ascent),
+      compare against original Shaper/MFOS baselines from scalable opponent shaping.
+
+Architecture:
+  - WelfareShaperAtt: single GRU + self-attention (from Shaper), works in ALL environments
+  - WelfareShaper: 3-stream GRU + theta gating (from MFOS), works in IPD only (not STORM)
+
+Reference types for IR constraint:
+  - IR calibration: opponent learns against fixed (random) shaper → "what you'd get without shaping"
+  - Self-play: both agents learn independently with PPO → "what you'd get under naive learning"
+
+Pipeline: Phase 0 (baselines) → Phase 1 (references) → Phase 2 (welfare training) → Phase 3 (evaluation)
+
+=============================================================
+PHASE 0: ORIGINAL BASELINES (for comparison)
+=============================================================
+These are the original scalable opponent shaping experiments. Run them to have comparison targets.
+
+ID, Meta-Agent, Optimizer, NL, Game, Config, Command, Notes
+B1, Shaper (att), ES, Tabular, IPD, ipd/shaper_att_v_tabular, python -m pax.experiment +experiment/ipd=shaper_att_v_tabular seed=0, runner=evo_mixed_payoff; att_type=nothing; num_devices=1
+B2, Shaper (att), ES, PPO_memory, STORM, ipditm/train_shaper_att, python -m pax.experiment +experiment/ipditm=train_shaper_att seed=0 ++num_devices=1, att_type=avg; CNN+GRU; original uses 8 GPUs
+B3, Shaper (PPO_memory), ES, PPO_memory, CoinGame, cg/train_shaper, python -m pax.experiment +experiment/cg=train_shaper seed=0 ++num_devices=1, agent1 is PPO_memory (not Shaper class); original uses 4 GPUs
+B4, MFOS, ES, Tabular, IPD, ipd/mfos_att_v_tabular, python -m pax.experiment +experiment/ipd=mfos_att_v_tabular seed=0, runner=evo; num_devices=1
+B5, MFOS, ES, PPO_memory, STORM, ipditm/train_mfos_es, python -m pax.experiment +experiment/ipditm=train_mfos_es seed=0 ++num_devices=1, original uses 8 GPUs
+B6, MFOS, ES, PPO_memory, CoinGame, cg/train_mfos_es, python -m pax.experiment +experiment/cg=train_mfos_es seed=0 ++num_devices=1, original uses 4 GPUs
+B7, MFOS, PPO(RL), PPO_memory, STORM, ipditm/train_mfos_rl, python -m pax.experiment +experiment/ipditm=train_mfos_rl seed=0, runner=rl; no ES needed
+B8, MFOS, PPO(RL), PPO_memory, CoinGame, cg/train_mfos_rl, python -m pax.experiment +experiment/cg=train_mfos_rl seed=0, runner=rl; no ES needed
+
+=============================================================
+PHASE 1: NAIVE SELF-PLAY REFERENCES
+=============================================================
+Run these to get self-play reference returns (v_ref) for the manual calibration mode.
+Record the converged "Average Reward per Timestep: (r1, r2)" from the final iterations.
+
+ID, Agent1, Agent2, Game, Config, Command, Notes
+R1, Tabular, Tabular, IPD, ipd/tabular_v_tabular, python -m pax.experiment +experiment/ipd=tabular_v_tabular seed=0, runner=rl; env_type=sequential; record final (r1 r2)
+R2, PPO_memory, PPO_memory, CoinGame, cg/sanity, python -m pax.experiment +experiment/cg=sanity seed=0 ++num_iters=5000, runner=rl; env_type=sequential; increase iters for convergence
+R3, PPO_memory, PPO_memory, STORM, ipditm/independent_learners, python -m pax.experiment +experiment/ipditm=independent_learners seed=0, runner=rl; env_type=sequential; CNN+GRU
+
+After each run, record:
+  IPD expected: r1 ≈ r2 ≈ -2.0 (mutual defection) or -1.0 (mutual cooperation)
+  CG expected: r1 ≈ r2 ≈ ~0.3-0.5 (mixed strategies)
+  STORM expected: r1 ≈ r2 ≈ ~1.0-2.0 (depends on payoff matrix convergence)
+
+=============================================================
+PHASE 2: WELFARE SHAPER TRAINING
+=============================================================
+Two sub-phases: (a) with IR calibration (automatic), (b) with self-play references (manual, using Phase 1 values).
+
+--- Phase 2a: Welfare Training with IR Calibration (calibration_type: ir, the default) ---
+
+ID, Meta-Agent, Optimizer, NL, Game, Config, Command, Notes
+W1, WelfareShaperAtt, ES, Tabular, IPD, ipd/welfare_shaper_att_v_tabular, python -m pax.experiment +experiment/ipd=welfare_shaper_att_v_tabular seed=0, EXISTS; att_type=att; runner=welfare_evo; auto IR calibration
+W2, WelfareShaperAtt, ES, PPO_memory, STORM, ipditm/welfare_shaper_att, python -m pax.experiment +experiment/ipditm=welfare_shaper_att seed=0, EXISTS; att_type=avg; CNN+GRU; auto IR calibration
+W3, WelfareShaper(MFOS), ES, Tabular, IPD, ipd/welfare_shaper_v_tabular, python -m pax.experiment +experiment/ipd=welfare_shaper_v_tabular seed=0, EXISTS; MFOS-based; auto IR calibration; IPD only
+W4, WelfareShaperAtt, ES, PPO_memory, CoinGame, cg/welfare_shaper_att, python -m pax.experiment +experiment/cg=welfare_shaper_att seed=0, NEEDS CREATION; GRU (no CNN); auto IR calibration
+W5, WelfareShaper(MFOS), PPO(RL), Tabular, IPD, ipd/welfare_shaper_rl_v_tabular, python -m pax.experiment +experiment/ipd=welfare_shaper_rl_v_tabular seed=0, EXISTS; runner=welfare_rl; auto IR calibration
+
+--- Phase 2b: Welfare Training with Self-Play References (calibration_type: manual) ---
+Use the v_ref values recorded from Phase 1. Override via command line:
+
+ID, Base Config, Command (override with self-play refs), Notes
+W1-sp, ipd/welfare_shaper_att_v_tabular, python -m pax.experiment +experiment/ipd=welfare_shaper_att_v_tabular seed=0 ++welfare.calibration_type=manual ++welfare.v_ref_shaper=<R1_r1> ++welfare.v_ref_opponent=<R1_r2>, Replace <R1_r1> <R1_r2> with values from run R1
+W2-sp, ipditm/welfare_shaper_att, python -m pax.experiment +experiment/ipditm=welfare_shaper_att seed=0 ++welfare.calibration_type=manual ++welfare.v_ref_shaper=<R3_r1> ++welfare.v_ref_opponent=<R3_r2>, Replace with values from run R3
+W3-sp, ipd/welfare_shaper_v_tabular, python -m pax.experiment +experiment/ipd=welfare_shaper_v_tabular seed=0 ++welfare.calibration_type=manual ++welfare.v_ref_shaper=<R1_r1> ++welfare.v_ref_opponent=<R1_r2>, Replace with values from run R1
+W4-sp, cg/welfare_shaper_att, python -m pax.experiment +experiment/cg=welfare_shaper_att seed=0 ++welfare.calibration_type=manual ++welfare.v_ref_shaper=<R2_r1> ++welfare.v_ref_opponent=<R2_r2>, Replace with values from run R2
+
+--- Phase 2c: Ablation — Pure Welfare (no IR constraints) ---
+Set v_ref to very negative values so constraints are always satisfied (mu stays 0).
+
+ID, Base Config, Command, Notes
+W1-noIR, ipd/welfare_shaper_att_v_tabular, python -m pax.experiment +experiment/ipd=welfare_shaper_att_v_tabular seed=0 ++welfare.calibration_type=manual ++welfare.v_ref_shaper=-100 ++welfare.v_ref_opponent=-100, Pure welfare maximisation; no IR pressure
+W2-noIR, ipditm/welfare_shaper_att, python -m pax.experiment +experiment/ipditm=welfare_shaper_att seed=0 ++welfare.calibration_type=manual ++welfare.v_ref_shaper=-100 ++welfare.v_ref_opponent=-100, Pure welfare maximisation; no IR pressure
+
+=============================================================
+PHASE 3: EVALUATION (freeze shaper, fresh NL learns)
+=============================================================
+After Phase 2 training, update model_path and run_path in the eval configs.
+
+ID, Shaper, NL, Game, Config, Command, Notes
+E1, WelfareShaperAtt, Tabular, IPD, ipd/eval_welfare_shaper_att_v_tabular, python -m pax.experiment +experiment/ipd=eval_welfare_shaper_att_v_tabular seed=0, EXISTS; update model_path + run_path; set welfare.v_ref_* from training
+E2, WelfareShaper(MFOS), Tabular, IPD, ipd/eval_welfare_shaper_v_tabular, python -m pax.experiment +experiment/ipd=eval_welfare_shaper_v_tabular seed=0, EXISTS; update model_path + run_path
+E3, WelfareShaperAtt, PPO_memory, STORM, ipditm/eval_welfare_shaper_att, python -m pax.experiment +experiment/ipditm=eval_welfare_shaper_att seed=0, EXISTS; update model_path + run_path
+E4, WelfareShaperAtt, PPO_memory, CoinGame, cg/eval_welfare_shaper_att, python -m pax.experiment +experiment/cg=eval_welfare_shaper_att seed=0, NEEDS CREATION
+
+=============================================================
+CONFIGS TO CREATE
+=============================================================
+The following configs do not exist yet and need to be created:
+
+1. cg/welfare_shaper_att.yaml        — WelfareShaperAtt ES vs PPO_memory in CoinGame (training)
+2. cg/eval_welfare_shaper_att.yaml   — WelfareShaperAtt eval in CoinGame (evaluation)
+
+=============================================================
+MULTI-SEED RUNS
+=============================================================
+For statistical significance, run each experiment with multiple seeds.
+Append different seeds to the command, e.g.:
+
+  for seed in 0 1 2 3 4; do
+    python -m pax.experiment +experiment/ipd=welfare_shaper_att_v_tabular seed=$seed
+  done
+
+=============================================================
+EXPECTED RESULTS & WHAT TO COMPARE
+=============================================================
+For each game, compare these columns across methods:
+
+  | Method               | R_shaper | R_opponent | Welfare (R1+R2) | IR_shaper | IR_opponent |
+  |----------------------|----------|------------|-----------------|-----------|-------------|
+  | Naive Self-Play (R*) |   ref    |    ref     |      ref        |    n/a    |     n/a     |
+  | Shaper (B*)          |    -     |     -      |       -         |    n/a    |     n/a     |
+  | MFOS (B*)            |    -     |     -      |       -         |    n/a    |     n/a     |
+  | Welfare+IR (W*-ir)   |    -     |     -      |       -         |  PASS/FAIL|  PASS/FAIL  |
+  | Welfare+SP (W*-sp)   |    -     |     -      |       -         |  PASS/FAIL|  PASS/FAIL  |
+  | Welfare-noIR (W*-noIR)|   -     |     -      |       -         |    n/a    |     n/a     |
+
+Key questions to answer:
+  1. Does welfare shaper achieve higher welfare than original Shaper/MFOS?
+  2. Do IR constraints hold? (both shaper and opponent get >= v_ref)
+  3. IR calibration vs self-play reference: which gives tighter/more meaningful constraints?
+  4. Does removing IR constraints (noIR ablation) increase welfare but hurt individual returns?
+  5. WelfareShaperAtt vs WelfareShaper(MFOS): does attention architecture matter for welfare?
+
+=============================================================
+COMPUTE NOTES
+=============================================================
+- Original CoinGame configs use num_devices=4, STORM configs use num_devices=8.
+- For single-GPU: add ++num_devices=1. Effective popsize = popsize * num_devices,
+  so for equivalent scale on 1 GPU, multiply popsize accordingly
+  (e.g., STORM: popsize=1024 with num_devices=1 instead of popsize=128 with num_devices=8).
+- Welfare runners (welfare_evo, welfare_rl) only support num_devices=1 currently.
+  Multi-device support uses pmap in the rollout; welfare_evo already has this.
+- IPD experiments are lightweight (minutes). CG/STORM are heavier (hours-days depending on GPU).
