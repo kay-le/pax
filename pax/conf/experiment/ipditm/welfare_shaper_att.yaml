@@ -112,8 +112,9 @@ es:
 
 # Logging setup
 wandb:
-  entity: "ucl-dark"
+  entity: "lichenqi-university-of-regina"
   project: ipditm
   group: 'welfare-${agent1}-vs-${agent2}'
   name: run-seed-${seed}
-  log: False
+  log: True
+  mode: offline

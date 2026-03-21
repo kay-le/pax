@@ -93,7 +93,9 @@ class WelfareShaper(AgentInterface):
             actions = dist.sample(seed=subkey)
             mem.extras["values"] = values
             mem.extras["log_probs"] = dist.log_prob(actions)
-#curr_th gets accumulated within an episode and stored in mem. But curr_th is only used by actor and critic within the episode, and is not copied back to mem.th until the meta step between episodes. This means that shaping weights are updated within episode, but only get applied to the policy in the next episode. This is important for stability of training.
+#curr_th gets updated within an episode and stored in mem.  
+# but the updated curr_th only get applied to the policy in the next episode by copying to th. 
+# This is important for stability of training.
             mem = mem._replace(
                 hidden=hidden, curr_th=_current_th, extras=mem.extras
             )

@@ -37,7 +37,7 @@ Record the converged "Average Reward per Timestep: (r1, r2)" from the final iter
 
 ID, Agent1, Agent2, Game, Config, Command, Notes
 R1, Tabular, Tabular, IPD, ipd/tabular_v_tabular, python -m pax.experiment +experiment/ipd=tabular_v_tabular seed=0, runner=rl; env_type=sequential; record final (r1 r2)
-R2, PPO_memory, PPO_memory, CoinGame, cg/sanity, python -m pax.experiment +experiment/cg=sanity seed=0 ++num_iters=5000, runner=rl; env_type=sequential; increase iters for convergence
+R2, PPO_memory, PPO_memory, CoinGame, cg/independent_learners, python -m pax.experiment +experiment/cg=independent_learners seed=0, runner=rl; env_type=sequential; 10000 iters; job script: jobs/cg_selfplay.sh
 R3, PPO_memory, PPO_memory, STORM, ipditm/independent_learners, python -m pax.experiment +experiment/ipditm=independent_learners seed=0, runner=rl; env_type=sequential; CNN+GRU
 
 After each run, record:
@@ -132,6 +132,7 @@ COMPUTE NOTES
 - For single-GPU: add ++num_devices=1. Effective popsize = popsize * num_devices,
   so for equivalent scale on 1 GPU, multiply popsize accordingly
   (e.g., STORM: popsize=1024 with num_devices=1 instead of popsize=128 with num_devices=8).
-- Welfare runners (welfare_evo, welfare_rl) only support num_devices=1 currently.
-  Multi-device support uses pmap in the rollout; welfare_evo already has this.
+- Welfare EVO runner (welfare_evo) fully supports multi-device via pmap, same as EvoRunner.
+  Use ++num_devices=N to split the population across N GPUs (effective popsize = popsize * num_devices).
+- Welfare RL runner (welfare_rl) does not use pmap (same as RLRunner) — single device only.
 - IPD experiments are lightweight (minutes). CG/STORM are heavier (hours-days depending on GPU).

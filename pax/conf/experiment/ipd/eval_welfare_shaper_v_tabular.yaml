@@ -78,8 +78,9 @@ ppo2:
 
 # Logging setup
 wandb:
-  entity: "ucl-dark"
+  entity: "lichenqi-university-of-regina"
   project: ipd
   group: 'eval-welfare-${agent1}-vs-${agent2}'
   name: eval-seed-${seed}
-  log: False
+  log: True
+  mode: offline

@@ -87,23 +87,8 @@ class WelfareEvoRunner:
         self.mu1 = 0.0  # shaper IR multiplier
         self.mu2 = 0.0  # opponent IR multiplier
         self.dual_lr = welfare_cfg.dual_lr if welfare_cfg else 0.01
-        # calibration_type: "ir" = run IR calibration (default),
-        #                   "manual" = skip calibration, use provided v_ref values
-        self.calibration_type = (
-            welfare_cfg.calibration_type
-            if welfare_cfg and hasattr(welfare_cfg, "calibration_type")
-            else "ir"
-        )
-        self.v_ref_shaper = (
-            welfare_cfg.v_ref_shaper
-            if welfare_cfg and hasattr(welfare_cfg, "v_ref_shaper")
-            else 0.0
-        )
-        self.v_ref_opponent = (
-            welfare_cfg.v_ref_opponent
-            if welfare_cfg and hasattr(welfare_cfg, "v_ref_opponent")
-            else 0.0
-        )
+        self.v_ref_shaper = 0.0   # set during calibration
+        self.v_ref_opponent = 0.0  # set during calibration
         self.calibration_episodes = (
             welfare_cfg.calibration_episodes if welfare_cfg else 10
         )
@@ -129,6 +114,12 @@ class WelfareEvoRunner:
 
         self.num_outer_steps = args.num_outer_steps
         agent1, agent2 = agents
+
+        # Save the original (un-batched) hidden state before any batch_init.
+        # calibrate() and run_loop() both call batch_init, which updates
+        # agent1._mem.hidden to shape (popsize, num_opps, ...).  Tiling that
+        # again would double the popsize dimension, so we always tile from here.
+        self._a1_init_hidden = agent1._mem.hidden
 
         # ------------------------------------------------------------------
         # Vmap agents  (identical to EvoRunner)
@@ -237,8 +228,7 @@ class WelfareEvoRunner:
                 env_state, env_params,
             ) = vals
 
-            # Meta-action for MFOS-based welfare shaper
-            # WelfareShaperAtt uses attention instead — no meta_policy needed
+            # Meta-action for welfare shaper (same as MFOS)
             if args.agent1 in ["WelfareShaper", "MFOS"]:
                 a1_mem = agent1.meta_policy(a1_mem)
 
@@ -372,7 +362,7 @@ class WelfareEvoRunner:
         evo_state = strategy.initialize(rng, es_params)
 
         init_hidden = jnp.tile(
-            agent1._mem.hidden, (popsize, num_opps, 1, 1),
+            self._a1_init_hidden, (popsize, num_opps, 1, 1),
         )
         a1_rng = jax.random.split(rng, popsize)
         agent1._state, agent1._mem = agent1.batch_init(a1_rng, init_hidden)
@@ -419,14 +409,7 @@ class WelfareEvoRunner:
     ):
         """Run training with Lagrangian dual ascent on IR constraints."""
         # ---- Step 0: calibration ----
-        if self.calibration_type == "manual":
-            print(
-                f"Skipping calibration (manual v_ref).  "
-                f"v_ref_shaper={self.v_ref_shaper:.4f}  "
-                f"v_ref_opponent={self.v_ref_opponent:.4f}"
-            )
-        else:
-            self.calibrate(env_params, agents, self.calibration_episodes)
+        self.calibrate(env_params, agents, self.calibration_episodes)
 
         print("Training (Welfare + Lagrangian IR)")
         print("------------------------------")
@@ -467,7 +450,7 @@ class WelfareEvoRunner:
         log = es_logging.initialize()
 
         init_hidden = jnp.tile(
-            agent1._mem.hidden, (popsize, num_opps, 1, 1),
+            self._a1_init_hidden, (popsize, num_opps, 1, 1),
         )
         a1_rng = jax.random.split(rng, popsize)
         agent1._state, agent1._mem = agent1.batch_init(a1_rng, init_hidden)
