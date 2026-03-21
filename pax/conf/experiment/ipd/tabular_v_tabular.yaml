@@ -47,8 +47,9 @@ ppo:
 
 # Logging setup
 wandb:
-  entity: "ucl-dark"
+  entity: "lichenqi-university-of-regina"
   project: ipd
   group: 'Tabular-vs-${agent2}-parity'
   name: run-seed-${seed}
   log: True
+  mode: offline

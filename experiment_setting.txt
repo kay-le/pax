@@ -1,0 +1,11 @@
+scalabable opponent shaping offical experiment settings:
+
+Meta-Agent, Meta-Optimizer, Meta-Parameterization, Naive Learner (NL) Parameterization, Game, Execution Command, Notes
+Shaper, ES, Shaper / recurrent-metadata agent (attention-style config in repo), Tabular (PPO), Finite IPD, python -m pax.experiment +experiment/ipd=shaper_att_v_tabular ++env_type="meta", Uses the explicit Shaper config rather than shaper_v_tabular.
+Shaper, ES, PPO_memory / GRU-style recurrent, PPO_memory / GRU-style recurrent, Coin Game, python -m pax.experiment +experiment/cg=train_shaper ++env_type="meta", Repo group is cg, not coin_game.
+Shaper, ES, Shaper (attention-style) / CNN + GRU-style recurrent, PPO_memory / CNN + GRU-style recurrent, STORM (InTheMatrix / ipditm), python -m pax.experiment +experiment/ipditm=train_shaper_att ++env_type="meta", Repo group is ipditm; InTheMatrix is the repo name for the environment later referred to as STORM.
+M-FOS, ES, Non-recurrent / no-memory PPO-style parametric setup, Tabular (PPO), Finite IPD, python -m pax.experiment +experiment/ipd=mfos_att_v_tabular ++runner="evo" ++env_type="meta", This is the documented repo command.
+M-FOS, ES, MFOS vs PPO_memory / GRU-style recurrent, PPO_memory / GRU-style recurrent, Coin Game, python -m pax.experiment +experiment/cg=train_mfos_es ++env_type="meta", Repo group is cg, not coin_game.
+M-FOS, PPO, MFOS vs PPO_memory / GRU-style recurrent, PPO_memory / GRU-style recurrent, Coin Game, python -m pax.experiment +experiment/cg=train_mfos_rl ++env_type="meta", Repo group is cg, not coin_game.
+M-FOS, ES, MFOS vs PPO_memory / CNN + GRU-style recurrent, PPO_memory / CNN + GRU-style recurrent, STORM (InTheMatrix / ipditm), python -m pax.experiment +experiment/ipditm=train_mfos_es ++env_type="meta", Repo group is ipditm; InTheMatrix is the repo name.
+M-FOS, PPO, MFOS vs PPO_memory / CNN + GRU-style recurrent, PPO_memory / CNN + GRU-style recurrent, STORM (InTheMatrix / ipditm), python -m pax.experiment +experiment/ipditm=train_mfos_rl ++env_type="meta", Repo group is ipditm; InTheMatrix is the repo name.

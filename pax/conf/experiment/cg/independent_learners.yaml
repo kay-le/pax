@@ -1,34 +1,35 @@
 # @package _global_
 
-# Agents  
-agent1: 'PPO_memory' #PPO_memory vs Stay takes like 2000 episodes
+# CoinGame: PPO_memory vs PPO_memory (naive self-play / independent learners)
+# Use this to get the self-play reference returns (v_ref) for welfare shaper training.
+# Record the converged "Average Reward per Timestep: (r1, r2)" from the final iterations.
+
+# Agents
+agent1: 'PPO_memory'
 agent2: 'PPO_memory'
 
 # Environment
-env_id: InTheMatrix
+env_id: coin_game
 env_type: sequential
+egocentric: True
 env_discount: 0.96
-payoff: [[[3, 0], [5, 1]], [[3, 5], [0, 1]]]
-freeze: 5
-runner: rl
-fixed_coins: True
+payoff: [[1, 1, -2], [1, 1, -2]]
 
-# Training hyperparameters
-num_envs: 50
+# Runner
+runner: rl
+
+# Training
+num_envs: 100
 num_opps: 1
 num_outer_steps: 1
-num_inner_steps: 128 
-num_iters: 1e4
-save_interval: 1e4
-
-# Evaluation 
-run_path: ucl-dark/cg/3sp0y2cy
-model_path: exp/coin_game-PPO_memory-vs-PPO_memory-parity/run-seed-0/2022-09-12_11.21.52.633382/iteration_74900
+num_inner_steps: 16
+num_iters: 10000
+save_interval: 10000
 
 # PPO agent parameters
 ppo1:
   num_minibatches: 8
-  num_epochs: 2 
+  num_epochs: 2
   gamma: 0.96
   gae_lambda: 0.95
   ppo_clipping_epsilon: 0.2
@@ -40,18 +41,18 @@ ppo1:
   entropy_coeff_horizon: 0.6e8
   entropy_coeff_end: 0.05
   lr_scheduling: False
-  learning_rate: 0.005 #0.05
+  learning_rate: 0.005
   adam_epsilon: 1e-5
   with_memory: True
-  with_cnn: True
+  with_cnn: False
   output_channels: 16
   kernel_shape: [3, 3]
-  separate: True # only works with CNN
-  hidden_size: 8 #50
+  separate: True
+  hidden_size: 16
 
 ppo2:
   num_minibatches: 8
-  num_epochs: 2 
+  num_epochs: 2
   gamma: 0.96
   gae_lambda: 0.95
   ppo_clipping_epsilon: 0.2
@@ -63,20 +64,20 @@ ppo2:
   entropy_coeff_horizon: 0.6e8
   entropy_coeff_end: 0.05
   lr_scheduling: False
-  learning_rate: 0.005 #0.05
+  learning_rate: 0.005
   adam_epsilon: 1e-5
   with_memory: True
-  with_cnn: True
+  with_cnn: False
   output_channels: 16
   kernel_shape: [3, 3]
-  separate: True # only works with CNN
-  hidden_size: 8 #50
+  separate: True
+  hidden_size: 16
 
 # Logging setup
 wandb:
   entity: "lichenqi-university-of-regina"
-  project: ipditm
-  group: 'sanity-${agent1}-vs-${agent2}'
+  project: cg
+  group: 'independent-learners-${agent1}-vs-${agent2}'
   name: run-seed-${seed}
   log: True
   mode: offline

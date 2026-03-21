@@ -3,6 +3,12 @@ import os
 from datetime import datetime
 from functools import partial
 
+# Keep matplotlib cache/config in a writable local folder.
+if "MPLCONFIGDIR" not in os.environ:
+    os.environ["MPLCONFIGDIR"] = os.path.join(
+        os.getcwd(), ".matplotlib"
+    )
+
 import gymnax
 import hydra
 import jax
@@ -16,6 +22,8 @@ import jax.extend
 from pax.agents.hyper.ppo import make_hyper
 from pax.agents.lola.lola import make_lola
 from pax.agents.mfos_ppo.ppo_gru import make_mfos_agent
+from pax.agents.welfare_shaper.welfare_shaper import make_welfare_shaper_agent
+from pax.agents.welfare_shaper_att.welfare_shaper_att import make_welfare_shaper_att_agent
 from pax.agents.naive.naive import make_naive_pg
 from pax.agents.naive_exact import NaiveExact
 from pax.agents.ppo.ppo import make_agent
@@ -73,6 +81,9 @@ from pax.runners.experimental.runner_evo_mixed_payoffs_input import EvoMixedPayo
 from pax.runners.experimental.runner_evo_mixed_payoffs_gen import EvoMixedPayoffGenRunner
 from pax.runners.experimental.runner_evo_mixed_payoffs_only_opp import EvoMixedPayoffOnlyOppRunner
 from pax.runners.runner_evo_scanned import EvoScannedRunner
+from pax.runners.runner_welfare_evo import WelfareEvoRunner
+from pax.runners.runner_welfare_marl import WelfareRLRunner
+from pax.runners.runner_eval_welfare import WelfareEvalRunner
 
 from pax.envs.iterated_tensor_game_n_player import IteratedTensorGameNPlayer
 from pax.envs.rice.c_rice import ClubRice
@@ -307,8 +318,12 @@ def runner_setup(args, env, agents, save_dir, logger):
         logger.info("Evaluating with ipditmEvalRunner")
         return IPDITMEvalRunner(agents, env, save_dir, args)
 
+    elif args.runner == "welfare_eval":
+        logger.info("Evaluating with WelfareEvalRunner")
+        return WelfareEvalRunner(agents, env, args)
+
     if args.runner in ["evo", "evo_mixed_lr", "evo_hardstop", "evo_mixed_payoff", "evo_mixed_ipd_payoff",
-    "evo_mixed_payoff_gen", "evo_mixed_payoff_input", "evo_scanned", "evo_mixed_payoff_only_opp", "multishaper_evo", "evo_nroles"]:
+    "evo_mixed_payoff_gen", "evo_mixed_payoff_input", "evo_scanned", "evo_mixed_payoff_only_opp", "multishaper_evo", "evo_nroles", "welfare_evo"]:
         agent1 = agents[0]
         algo = args.es.algo
         strategies = {"CMA_ES", "OpenES", "PGPE", "SimpleGA"}
@@ -459,6 +474,21 @@ def runner_setup(args, env, agents, save_dir, logger):
                 args,
             )
 
+        elif args.runner == "welfare_evo":
+            logger.info("Training with Welfare EVO runner (Lagrangian IR)")
+            return WelfareEvoRunner(
+                agents,
+                env,
+                strategy,
+                es_params,
+                param_reshaper,
+                save_dir,
+                args,
+            )
+
+    elif args.runner == "welfare_rl":
+        logger.info("Training with Welfare RL runner (Lagrangian IR)")
+        return WelfareRLRunner(agents, env, save_dir, args)
     elif args.runner == "rl":
         logger.info("Training with RL Runner")
         return RLRunner(agents, env, save_dir, args)
@@ -614,6 +644,49 @@ def agent_setup(args, env, env_params, logger):
         )
         return ppo_agent
 
+    def get_welfare_shaper_agent(seed, player_id):
+        default_player_args = omegaconf.OmegaConf.select(
+            args, "ppo_default", default=None
+        )
+        agent_args = omegaconf.OmegaConf.select(
+            args, "ppo" + str(player_id), default=default_player_args
+        )
+
+        num_iterations = args.num_iters
+        if player_id == 1 and args.env_type == "meta":
+            num_iterations = args.num_outer_steps
+        welfare_agent = make_welfare_shaper_agent(
+            args,
+            agent_args,
+            obs_spec=obs_shape,
+            num_iterations=num_iterations,
+            action_spec=num_actions,
+            seed=seed,
+            player_id=player_id,
+        )
+        return welfare_agent
+
+    def get_welfare_shaper_att_agent(seed, player_id):
+        default_player_args = omegaconf.OmegaConf.select(
+            args, "ppo_default", default=None
+        )
+        agent_args = omegaconf.OmegaConf.select(
+            args, "ppo" + str(player_id), default=default_player_args
+        )
+
+        num_iterations = args.num_iters
+        if player_id == 1 and args.env_type == "meta":
+            num_iterations = args.num_outer_steps
+        return make_welfare_shaper_att_agent(
+            args,
+            agent_args,
+            obs_spec=obs_shape_meta,
+            action_spec=num_actions,
+            seed=seed,
+            num_iterations=num_iterations,
+            player_id=player_id,
+        )
+
     def get_hyper_agent(seed, player_id):
         hyper_agent = make_hyper(
             args,
@@ -678,6 +751,8 @@ def agent_setup(args, env, env_params, logger):
         "Naive": get_naive_pg,
         "Tabular": get_PPO_tabular_agent,
         "MFOS": get_mfos_agent,
+        "WelfareShaper": get_welfare_shaper_agent,
+        "WelfareShaperAtt": get_welfare_shaper_att_agent,
         # HyperNetworks
         "Hyper": get_hyper_agent,
         "NaiveEx": get_naive_learner,
@@ -811,6 +886,8 @@ def watcher_setup(args, logger):
         "EvilGreedy": dumb_log,
         "RandomGreedy": dumb_log,
         "MFOS": dumb_log,
+        "WelfareShaper": dumb_log,
+        "WelfareShaperAtt": ppo_memory_log,
         "PPO": ppo_log,
         "LOLA": dumb_log,
         "PPO_memory": ppo_memory_log,
@@ -878,17 +955,21 @@ def main(args):
     print(f"Number of Training Iterations: {args.num_iters}")
 
     if args.runner in ["evo", "evo_mixed_lr", "evo_hardstop", "evo_mixed_payoff", "evo_mixed_ipd_payoff",
-    "evo_mixed_payoff_gen", "evo_mixed_payoff_input", "evo_scanned", "evo_mixed_payoff_only_opp", "multishaper_evo", "evo_nroles"]:
+    "evo_mixed_payoff_gen", "evo_mixed_payoff_input", "evo_scanned", "evo_mixed_payoff_only_opp", "multishaper_evo", "evo_nroles", "welfare_evo"]:
         print(f"Running {args.runner}")
 
         runner.run_loop(env_params, agent_pair, args.num_iters, watchers)
-    elif args.runner == "rl" or args.runner == "tensor_rl_nplayer":
+    elif args.runner in ["rl", "tensor_rl_nplayer", "welfare_rl"]:
         # number of episodes
         print(f"Number of Episodes: {args.num_iters}")
         runner.run_loop(env_params, agent_pair, args.num_iters, watchers)
 
     elif args.runner == "ipditm_eval" or args.runner == "multishaper_eval":
         runner.run_loop(env_params, agent_pair, watchers)
+
+    elif args.runner == "welfare_eval":
+        print(f"Number of Episodes: {args.num_iters}")
+        runner.run_loop(env, env_params, agent_pair, args.num_iters, watchers)
 
     elif args.runner in ["eval", "stevie", "eval_hardstop", "weight_sharing", "sarl"] or args.runner == 'stevie' or args.runner == "eval_hardstop":
         print(f"Number of Episodes: {args.num_iters}")
