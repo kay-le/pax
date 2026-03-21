@@ -1,0 +1,42 @@
+#!/bin/bash
+#SBATCH --account=def-jtyao_gpu
+#SBATCH --job-name=W4sp_cg_welfare_att
+#SBATCH --gpus-per-node=h100:4
+#SBATCH --cpus-per-task=6
+#SBATCH --mem=32G
+#SBATCH --time=06:00:00
+#SBATCH --output=%x-%N-%j.out
+
+module load python/3.11.5
+module load cuda/12.6
+source /home/lichenqi/pax_env_py3.11.5/bin/activate
+
+export WANDB_API_KEY="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"
+export TMPDIR="${SLURM_TMPDIR:-/tmp}"
+mkdir -p "$TMPDIR/wandb" "$TMPDIR/wandb-cache" "$TMPDIR/wandb_config"
+
+export WANDB_DIR="$TMPDIR/wandb"
+export WANDB_CACHE_DIR="$TMPDIR/wandb-cache"
+export WANDB_CONFIG_DIR="$TMPDIR/wandb_config"
+export WANDB_SERVICE_TRANSPORT=tcp
+export WANDB__SERVICE_WAIT=180
+export WANDB_INIT_TIMEOUT=180
+export WANDB_START_METHOD=thread
+
+SEED=${1:-0}
+EXPERIMENT="cg=welfare_shaper_att"
+start_time=$(date +%s)
+echo "Start W4-sp $EXPERIMENT (self-play ref): $(date '+%Y-%m-%d %H:%M:%S')"
+
+cd /home/lichenqi/pax
+# TODO: Replace <R2_r1> and <R2_r2> with values from Phase 1 run R2
+python -m pax.experiment +experiment/$EXPERIMENT seed=$SEED ++num_devices=4 \
+    ++welfare.calibration_type=manual \
+    ++welfare.v_ref_shaper=<R2_r1> \
+    ++welfare.v_ref_opponent=<R2_r2>
+
+mkdir -p "$HOME/wandb_saved"
+cp -r "$WANDB_DIR"/wandb/offline-run-* "$HOME/wandb_saved/" 2>/dev/null || true
+end_time=$(date +%s)
+echo "End W4-sp $EXPERIMENT: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "Elapsed: $((end_time - start_time)) seconds"
