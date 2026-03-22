@@ -95,10 +95,11 @@ es:
   
 # Logging setup
 wandb:
-  entity: "ucl-dark"
+  entity: "lichenqi-university-of-regina"
   project: ipd
   group: '${agent1}-vs-${agent2}'
-  name: run-seed-${seed}-pop-size-${popsize}
-  log: False
+  name: run-seed-${seed}
+  log: True
+  mode: offline
 
 

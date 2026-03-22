@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --account=def-jtyao_gpu
 #SBATCH --job-name=W2noIR_ipditm_welfare_att
-#SBATCH --gpus-per-node=h100:4
+#SBATCH --gpus-per-node=h100:8
 #SBATCH --cpus-per-task=6
 #SBATCH --mem=32G
-#SBATCH --time=06:00:00
+#SBATCH --time=20:00:00
 #SBATCH --output=%x-%N-%j.out
 
 module load python/3.11.5
@@ -29,7 +29,7 @@ start_time=$(date +%s)
 echo "Start W2-noIR $EXPERIMENT (pure welfare, no IR): $(date '+%Y-%m-%d %H:%M:%S')"
 
 cd /home/lichenqi/pax
-python -m pax.experiment +experiment/$EXPERIMENT seed=$SEED ++num_devices=4 \
+python -m pax.experiment +experiment/$EXPERIMENT seed=$SEED ++num_devices=8 \
     ++welfare.calibration_type=manual \
     ++welfare.v_ref_shaper=-100 \
     ++welfare.v_ref_opponent=-100

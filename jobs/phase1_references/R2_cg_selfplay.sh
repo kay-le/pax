@@ -4,7 +4,7 @@
 #SBATCH --gpus-per-node=h100:1
 #SBATCH --cpus-per-task=6
 #SBATCH --mem=16G
-#SBATCH --time=02:00:00
+#SBATCH --time=12:00:00
 #SBATCH --output=%x-%N-%j.out
 
 module load python/3.11.5
