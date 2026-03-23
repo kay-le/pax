@@ -574,7 +574,7 @@ class WelfareEvoRunner:
                     f"Lagrangian fitness: {float(fitness.mean()):.4f}"
                 )
                 print(
-                    f"Env Stats: {jax.tree_map(lambda x: x.item(), env_stats)}"
+                    f"Env Stats: {jax.tree_util.tree_map(lambda x: x.item(), env_stats)}"
                 )
                 print(
                     "--------------------------------------------------------------------------"
