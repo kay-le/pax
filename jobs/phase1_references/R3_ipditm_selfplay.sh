@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH --account=def-jtyao_gpu
 #SBATCH --job-name=R3_ipditm_selfplay
-#SBATCH --gpus-per-node=h100:1
+#SBATCH --gpus-per-node=h100:8
 #SBATCH --cpus-per-task=6
-#SBATCH --mem=16G
-#SBATCH --time=24:00:00
+#SBATCH --mem=32G
+#SBATCH --time=20:00:00
 #SBATCH --output=%x-%N-%j.out
 
 module load python/3.11.5
@@ -29,7 +29,7 @@ start_time=$(date +%s)
 echo "Start R3 $EXPERIMENT: $(date '+%Y-%m-%d %H:%M:%S')"
 
 cd /home/lichenqi/pax
-python -m pax.experiment +experiment/$EXPERIMENT seed=$SEED
+python -m pax.experiment +experiment/$EXPERIMENT seed=$SEED ++num_devices=8
 
 mkdir -p "$HOME/wandb_saved"
 cp -r "$WANDB_DIR"/wandb/offline-run-* "$HOME/wandb_saved/" 2>/dev/null || true
