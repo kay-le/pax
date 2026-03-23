@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --account=def-jtyao_gpu
 #SBATCH --job-name=W2sp_ipditm_welfare_att
-#SBATCH --gpus-per-node=h100:8
+#SBATCH --gpus-per-node=h100:4
 #SBATCH --cpus-per-task=6
 #SBATCH --mem=32G
 #SBATCH --time=20:00:00
@@ -30,7 +30,7 @@ echo "Start W2-sp $EXPERIMENT (self-play ref): $(date '+%Y-%m-%d %H:%M:%S')"
 
 cd /home/lichenqi/pax
 # TODO: Replace <R3_r1> and <R3_r2> with values from Phase 1 run R3
-python -m pax.experiment +experiment/$EXPERIMENT seed=$SEED ++num_devices=8 \
+python -m pax.experiment +experiment/$EXPERIMENT seed=$SEED ++num_devices=4 \
     ++welfare.calibration_type=manual \
     ++welfare.v_ref_shaper=<R3_r1> \
     ++welfare.v_ref_opponent=<R3_r2>

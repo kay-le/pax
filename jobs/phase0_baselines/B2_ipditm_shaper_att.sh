@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --account=def-jtyao_gpu
 #SBATCH --job-name=B2_ipditm_shaper_att
-#SBATCH --gpus-per-node=h100:8
+#SBATCH --gpus-per-node=h100:4
 #SBATCH --cpus-per-task=6
 #SBATCH --mem=32G
 #SBATCH --time=20:00:00
@@ -29,7 +29,7 @@ start_time=$(date +%s)
 echo "Start B2 $EXPERIMENT: $(date '+%Y-%m-%d %H:%M:%S')"
 
 cd /home/lichenqi/pax
-python -m pax.experiment +experiment/$EXPERIMENT seed=$SEED ++num_devices=8
+python -m pax.experiment +experiment/$EXPERIMENT seed=$SEED ++num_devices=4
 
 mkdir -p "$HOME/wandb_saved"
 cp -r "$WANDB_DIR"/wandb/offline-run-* "$HOME/wandb_saved/" 2>/dev/null || true
