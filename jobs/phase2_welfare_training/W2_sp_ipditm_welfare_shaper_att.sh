@@ -3,8 +3,8 @@
 #SBATCH --job-name=W2sp_ipditm_welfare_att
 #SBATCH --gpus-per-node=h100:4
 #SBATCH --cpus-per-task=6
-#SBATCH --mem=32G
-#SBATCH --time=20:00:00
+#SBATCH --mem=16G
+#SBATCH --time=1-20:00:00
 #SBATCH --output=%x-%N-%j.out
 
 module load python/3.11.5
