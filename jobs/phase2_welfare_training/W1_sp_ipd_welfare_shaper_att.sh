@@ -30,10 +30,7 @@ echo "Start W1-sp $EXPERIMENT (self-play ref): $(date '+%Y-%m-%d %H:%M:%S')"
 
 cd /home/lichenqi/pax
 # TODO: Replace <R1_r1> and <R1_r2> with values from Phase 1 run R1
-python -m pax.experiment +experiment/$EXPERIMENT seed=$SEED \
-    ++welfare.calibration_type=manual \
-    ++welfare.v_ref_shaper=<R1_r1> \
-    ++welfare.v_ref_opponent=<R1_r2>
+python -m pax.experiment +experiment/$EXPERIMENT seed=$SEED
 
 mkdir -p "$HOME/wandb_saved"
 cp -r "$WANDB_DIR"/wandb/offline-run-* "$HOME/wandb_saved/" 2>/dev/null || true
