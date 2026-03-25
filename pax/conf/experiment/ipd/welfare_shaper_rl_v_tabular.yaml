@@ -28,7 +28,10 @@ att_type: 'nothing'
 
 # Welfare / Lagrangian config
 welfare:
+  mu1: 0.0
+  mu2: 0.0
   dual_lr: 0.01
+  calibration: True
   calibration_episodes: 10
 
 # PPO agent parameters (for WelfareShaper = agent1)

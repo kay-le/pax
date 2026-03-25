@@ -23,7 +23,6 @@ from pax.agents.hyper.ppo import make_hyper
 from pax.agents.lola.lola import make_lola
 from pax.agents.mfos_ppo.ppo_gru import make_mfos_agent
 from pax.agents.welfare_shaper.welfare_shaper import make_welfare_shaper_agent
-from pax.agents.welfare_shaper_att.welfare_shaper_att import make_welfare_shaper_att_agent
 from pax.agents.naive.naive import make_naive_pg
 from pax.agents.naive_exact import NaiveExact
 from pax.agents.ppo.ppo import make_agent
@@ -667,25 +666,8 @@ def agent_setup(args, env, env_params, logger):
         return welfare_agent
 
     def get_welfare_shaper_att_agent(seed, player_id):
-        default_player_args = omegaconf.OmegaConf.select(
-            args, "ppo_default", default=None
-        )
-        agent_args = omegaconf.OmegaConf.select(
-            args, "ppo" + str(player_id), default=default_player_args
-        )
-
-        num_iterations = args.num_iters
-        if player_id == 1 and args.env_type == "meta":
-            num_iterations = args.num_outer_steps
-        return make_welfare_shaper_att_agent(
-            args,
-            agent_args,
-            obs_spec=obs_shape_meta,
-            action_spec=num_actions,
-            seed=seed,
-            num_iterations=num_iterations,
-            player_id=player_id,
-        )
+        """Reuse the Shaper (attention-based PPO) agent for welfare shaping."""
+        return get_Shaper_agent(seed, player_id)
 
     def get_hyper_agent(seed, player_id):
         hyper_agent = make_hyper(

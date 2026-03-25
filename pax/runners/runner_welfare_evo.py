@@ -83,24 +83,17 @@ class WelfareEvoRunner:
         # ------------------------------------------------------------------
         # Lagrangian dual variables  (IR constraints)
         # ------------------------------------------------------------------
-        welfare_cfg = getattr(args, "welfare", None)
-        self.mu1 = 0.0  # shaper IR multiplier
-        self.mu2 = 0.0  # opponent IR multiplier
-        self.dual_lr = welfare_cfg.dual_lr if welfare_cfg else 0.01
-        self.calibration_episodes = (
-            welfare_cfg.calibration_episodes if welfare_cfg else 10
-        )
-
-        # Check if v_ref values are provided in config (from reference run)
-        # If provided, use them directly; otherwise set to 0.0 and compute during calibration
-        if welfare_cfg and hasattr(welfare_cfg, "v_ref_shaper") and hasattr(welfare_cfg, "v_ref_opponent"):
-            self.v_ref_shaper = welfare_cfg.v_ref_shaper
-            self.v_ref_opponent = welfare_cfg.v_ref_opponent
-            self.skip_calibration = True
-        else:
+        self.mu1 = args.welfare.mu1
+        self.mu2 = args.welfare.mu2
+        self.dual_lr = args.welfare.dual_lr
+        self.calibration = args.welfare.calibration
+        if self.calibration:
+            self.calibration_episodes = args.welfare.calibration_episodes
             self.v_ref_shaper = 0.0
             self.v_ref_opponent = 0.0
-            self.skip_calibration = False
+        else:
+            self.v_ref_shaper = args.welfare.v_ref_shaper
+            self.v_ref_opponent = args.welfare.v_ref_opponent
 
         # ------------------------------------------------------------------
         # Vmap the environment (same pattern as EvoRunner)
@@ -417,15 +410,15 @@ class WelfareEvoRunner:
         watchers: Callable,
     ):
         """Run training with Lagrangian dual ascent on IR constraints."""
-        # ---- Step 0: calibration (skip if v_ref provided in config) ----
-        if self.skip_calibration:
+        # ---- Step 0: calibration ----
+        if self.calibration:
+            self.calibrate(env_params, agents, self.calibration_episodes)
+        else:
             print(
-                f"Skipping calibration. Using provided v_ref from config:"
+                f"Skipping calibration. Using provided v_ref:"
                 f"\n  v_ref_shaper={self.v_ref_shaper:.4f},"
                 f" v_ref_opponent={self.v_ref_opponent:.4f}"
             )
-        else:
-            self.calibrate(env_params, agents, self.calibration_episodes)
 
         print("Training (Welfare + Lagrangian IR)")
         print("------------------------------")

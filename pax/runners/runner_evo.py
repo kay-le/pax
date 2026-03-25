@@ -4,7 +4,6 @@ from datetime import datetime
 from typing import Any, Callable, NamedTuple
 
 import jax
-import jax.tree_util
 import jax.numpy as jnp
 from evosax import FitnessShaper
 

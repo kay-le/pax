@@ -5,7 +5,7 @@ Freezes a pretrained welfare shaper (agent1) and lets a fresh naive learner
 welfare, individual returns, and IR constraint satisfaction.
 
 Supports both WelfareShaper (MFOS-based, needs meta_policy between episodes)
-and WelfareShaperAtt (attention-based, no meta_policy).
+and WelfareShaperAtt (reuses Shaper attention-based PPO, no meta_policy).
 """
 
 import os
@@ -58,14 +58,9 @@ class WelfareEvalRunner:
         self.ipd_stats = jax.jit(ipd_visitation)
         self.cg_stats = jax.jit(cg_visitation)
 
-        # v_ref for IR constraint tracking (set from config or default 0)
-        welfare_cfg = getattr(args, "welfare", None)
-        self.v_ref_shaper = (
-            welfare_cfg.v_ref_shaper if welfare_cfg and hasattr(welfare_cfg, "v_ref_shaper") else 0.0
-        )
-        self.v_ref_opponent = (
-            welfare_cfg.v_ref_opponent if welfare_cfg and hasattr(welfare_cfg, "v_ref_opponent") else 0.0
-        )
+        # v_ref for IR constraint tracking
+        self.v_ref_shaper = args.welfare.v_ref_shaper
+        self.v_ref_opponent = args.welfare.v_ref_opponent
 
         # VMAP for num envs
         env.reset = jax.vmap(env.reset, (0, None), 0)

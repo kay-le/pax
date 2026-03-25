@@ -83,30 +83,17 @@ class WelfareRLRunner:
         # ------------------------------------------------------------------
         # Lagrangian dual variables
         # ------------------------------------------------------------------
-        welfare_cfg = getattr(args, "welfare", None)
-        self.mu1 = 0.0
-        self.mu2 = 0.0
-        self.dual_lr = welfare_cfg.dual_lr if welfare_cfg else 0.01
-        # calibration_type: "ir" = run IR calibration (default),
-        #                   "manual" = skip calibration, use provided v_ref values
-        self.calibration_type = (
-            welfare_cfg.calibration_type
-            if welfare_cfg and hasattr(welfare_cfg, "calibration_type")
-            else "ir"
-        )
-        self.v_ref_shaper = (
-            welfare_cfg.v_ref_shaper
-            if welfare_cfg and hasattr(welfare_cfg, "v_ref_shaper")
-            else 0.0
-        )
-        self.v_ref_opponent = (
-            welfare_cfg.v_ref_opponent
-            if welfare_cfg and hasattr(welfare_cfg, "v_ref_opponent")
-            else 0.0
-        )
-        self.calibration_episodes = (
-            welfare_cfg.calibration_episodes if welfare_cfg else 10
-        )
+        self.mu1 = args.welfare.mu1
+        self.mu2 = args.welfare.mu2
+        self.dual_lr = args.welfare.dual_lr
+        self.calibration = args.welfare.calibration
+        if self.calibration:
+            self.calibration_episodes = args.welfare.calibration_episodes
+            self.v_ref_shaper = 0.0
+            self.v_ref_opponent = 0.0
+        else:
+            self.v_ref_shaper = args.welfare.v_ref_shaper
+            self.v_ref_opponent = args.welfare.v_ref_opponent
 
         def _reshape_opp_dim(x):
             batch_size = args.num_envs * args.num_opps
@@ -198,7 +185,7 @@ class WelfareRLRunner:
                     done, a1_mem.hidden, a1_mem.th,
                 )
             else:
-                # WelfareShaperAtt or other: standard sample
+                # Attention-based shaper or other: standard sample
                 traj1 = Sample(
                     obs1, a1, rewards[0],
                     new_a1_mem.extras["log_probs"],
@@ -227,7 +214,7 @@ class WelfareRLRunner:
                 env_state, env_params,
             ) = vals
             # MFOS-based welfare shaper needs meta_policy between episodes
-            # WelfareShaperAtt does not — shaping is via attention on hidden states
+            # WelfareShaperAtt (Shaper) does not — shaping is via attention on hidden states
             if args.agent1 == "WelfareShaper":
                 a1_mem = agent1.meta_policy(a1_mem)
             a2_state, a2_mem, a2_metrics = agent2.batch_update(
@@ -393,15 +380,15 @@ class WelfareRLRunner:
     # ------------------------------------------------------------------
 
     def run_loop(self, env_params, agents, num_iters, watchers):
-        # Calibrate first (or skip if manual references provided)
-        if self.calibration_type == "manual":
-            print(
-                f"Skipping calibration (manual v_ref).  "
-                f"v_ref_shaper={self.v_ref_shaper:.4f}  "
-                f"v_ref_opponent={self.v_ref_opponent:.4f}"
-            )
-        else:
+        # Calibrate first (or skip if v_ref provided in config)
+        if self.calibration:
             self.calibrate(env_params, agents, self.calibration_episodes)
+        else:
+            print(
+                f"Skipping calibration. Using provided v_ref:"
+                f"\n  v_ref_shaper={self.v_ref_shaper:.4f},"
+                f" v_ref_opponent={self.v_ref_opponent:.4f}"
+            )
 
         print("Training (Welfare RL + Lagrangian IR)")
         print("-----------------------")
