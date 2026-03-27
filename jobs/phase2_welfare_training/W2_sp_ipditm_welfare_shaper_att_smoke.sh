@@ -1,18 +1,22 @@
 #!/bin/bash
-#SBATCH --account=def-jtyao_gpu
+#SBATCH --account=def-jtyao
 #SBATCH --job-name=W2sp_ipditm_welfare_att
-#SBATCH --gpus-per-node=h100:4
+#SBATCH --gpus-per-node=h100:1
 #SBATCH --cpus-per-task=6
-#SBATCH --mem=16G
 #SBATCH --time=1:00:00
-#SBATCH --output=%x-%N-%j.out
+#SBATCH --output=/scratch/lichenqi/%x-%N-%j.out
 
-module load python/3.11.5
+module load StdEnv/2023 gcc/12.3
 module load cuda/12.6
+module load python/3.11.5
 source /home/lichenqi/pax_env_py3.11.5/bin/activate
 
-export WANDB_API_KEY="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"
 export TMPDIR="${SLURM_TMPDIR:-/tmp}"
+
+export MPLCONFIGDIR="$TMPDIR/matplotlib"
+mkdir -p "$MPLCONFIGDIR"
+
+export WANDB_API_KEY="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"
 mkdir -p "$TMPDIR/wandb" "$TMPDIR/wandb-cache" "$TMPDIR/wandb_config"
 
 export WANDB_DIR="$TMPDIR/wandb"
@@ -30,10 +34,10 @@ echo "Start W2-sp $EXPERIMENT (self-play ref): $(date '+%Y-%m-%d %H:%M:%S')"
 
 cd /home/lichenqi/pax
 # TODO: Replace <R3_r1> and <R3_r2> with values from Phase 1 run R3
-python -m pax.experiment +experiment/$EXPERIMENT seed=21 ++num_iters=3 ++popsize=4 ++num_outer_steps=4 ++num_inner_steps=8 ++num_devices=4
+python -m pax.experiment +experiment/$EXPERIMENT seed=21 ++num_iters=3 ++popsize=4 ++num_outer_steps=4 ++num_inner_steps=8 ++num_devices=1 hydra.run.dir=$TMPDIR/hydra_output
 
-mkdir -p "$HOME/wandb_saved"
-cp -r "$WANDB_DIR"/wandb/offline-run-* "$HOME/wandb_saved/" 2>/dev/null || true
+mkdir -p /scratch/lichenqi/wandb_saved
+cp -r "$WANDB_DIR"/wandb/offline-run-* /scratch/lichenqi/wandb_saved/ 2>/dev/null || true
 end_time=$(date +%s)
 echo "End W2-sp $EXPERIMENT: $(date '+%Y-%m-%d %H:%M:%S')"
 echo "Elapsed: $((end_time - start_time)) seconds"
