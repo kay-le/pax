@@ -308,8 +308,8 @@ class WelfareEvoRunner:
                     lambda x: x.mean(),
                     self.ipd_stats(traj_1.observations, traj_1.actions, obs1),
                 )
-                rewards_1 = traj_1.rewards.mean()
-                rewards_2 = traj_2.rewards.mean()
+                rewards_1 = traj_1.rewards.sum(axis=1).mean()
+                rewards_2 = traj_2.rewards.sum(axis=1).mean()
             elif args.env_id == "InTheMatrix":
                 env_stats = jax.tree_util.tree_map(
                     lambda x: x.mean(),
@@ -317,12 +317,12 @@ class WelfareEvoRunner:
                         env_state, traj_1, traj_2, args.num_envs,
                     ),
                 )
-                rewards_1 = traj_1.rewards.mean()
-                rewards_2 = traj_2.rewards.mean()
+                rewards_1 = traj_1.rewards.sum(axis=1).mean()
+                rewards_2 = traj_2.rewards.sum(axis=1).mean()
             else:
                 env_stats = {}
-                rewards_1 = traj_1.rewards.mean()
-                rewards_2 = traj_2.rewards.mean()
+                rewards_1 = traj_1.rewards.sum(axis=1).mean()
+                rewards_2 = traj_2.rewards.sum(axis=1).mean()
 
             return (
                 welfare_per_member,
@@ -509,7 +509,7 @@ class WelfareEvoRunner:
             )
 
             # ---- Dual ascent on multipliers ----
-            mean_r1 = float(r1_per_member.mean())
+            mean_r1 = float(r1_per_member.mean()) # mean over population → scalar, it is still episode return averaged over all envs, opps, outer steps
             mean_r2 = float(r2_per_member.mean())
             # mu_k <- max(0, mu_k - alpha * (R_k_bar - v_ref_k))
             self.mu1 = max(0.0, self.mu1 - self.dual_lr * (mean_r1 - self.v_ref_shaper))
@@ -608,10 +608,10 @@ class WelfareEvoRunner:
                     "train/time/seconds": float(
                         (time.time() - self.start_time)
                     ),
-                    "train/reward_per_timestep/player_1": float(
+                    "train/reward_per_episode/player_1": float(
                         rewards_1.mean()
                     ),
-                    "train/reward_per_timestep/player_2": float(
+                    "train/reward_per_episode/player_2": float(
                         rewards_2.mean()
                     ),
                 }
