@@ -15,7 +15,10 @@ The runner has two phases:
      with dual ascent on mu1, mu2 after each generation.
 """
 
+import glob as glob_mod
 import os
+import pickle
+import re
 import time
 from datetime import datetime
 from typing import Any, Callable, NamedTuple
@@ -25,7 +28,7 @@ import jax.numpy as jnp
 from evosax import FitnessShaper
 
 import wandb
-from pax.utils import MemoryState, TrainingState, save
+from pax.utils import MemoryState, TrainingState, save, load
 from pax.watchers import ESLog, cg_visitation, ipd_visitation, ipditm_stats
 
 MAX_WANDB_CALLS = 1000
@@ -343,6 +346,45 @@ class WelfareEvoRunner:
         )
 
     # ------------------------------------------------------------------
+    # Checkpoint save / load  (builds on existing save_interval)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _find_latest_resume(resume_dir):
+        """Scan *resume_dir* recursively for ``generation_*_resume`` files
+        and return the path with the highest generation number, or None.
+
+        Expected layout (created by the bash copy step)::
+
+            resume_dir/
+            ├── 2026-03-28_14.32.01/
+            │   ├── generation_0
+            │   ├── generation_0_resume
+            │   ├── generation_100
+            │   └── generation_100_resume
+            └── 2026-03-29_10.00.00/
+                ├── generation_200
+                └── generation_200_resume
+        """
+        pattern = os.path.join(resume_dir, "**", "generation_*_resume")
+        candidates = glob_mod.glob(pattern, recursive=True)
+        if not candidates:
+            return None
+
+        # Parse generation number from each path
+        best_gen = -1
+        best_path = None
+        for path in candidates:
+            basename = os.path.basename(path)  # e.g. "generation_600_resume"
+            match = re.search(r"generation_(\d+)_resume$", basename)
+            if match:
+                gen_num = int(match.group(1))
+                if gen_num > best_gen:
+                    best_gen = gen_num
+                    best_path = path
+        return best_path
+
+    # ------------------------------------------------------------------
     # Calibration phase
     # ------------------------------------------------------------------
 
@@ -411,8 +453,21 @@ class WelfareEvoRunner:
         watchers: Callable,
     ):
         """Run training with Lagrangian dual ascent on IR constraints."""
-        # ---- Step 0: calibration ----
-        if self.calibration:
+
+        # ---- Check for checkpoint to resume from ----
+        resume_dir = getattr(self.args.welfare, 'resume_dir', "")
+        resume_path = None
+        if resume_dir and os.path.isdir(resume_dir):
+            resume_path = self._find_latest_resume(resume_dir)
+            if resume_path:
+                print(f"[Resume] Found checkpoint: {resume_path}")
+            else:
+                print(f"[Resume] No generation_*_resume files in {resume_dir}, starting fresh.")
+
+        # ---- Step 0: calibration (skip on resume) ----
+        if resume_path:
+            print("[Resume] Skipping calibration — will restore from checkpoint.")
+        elif self.calibration:
             self.calibrate(env_params, agents, self.calibration_episodes)
         else:
             print(
@@ -466,7 +521,24 @@ class WelfareEvoRunner:
         agent1._state, agent1._mem = agent1.batch_init(a1_rng, init_hidden)
         a1_state, a1_mem = agent1._state, agent1._mem
 
-        for gen in range(num_iters):
+        # ---- Resume from checkpoint if available ----
+        start_gen = 0
+        if resume_path:
+            ckpt = load(resume_path)
+            start_gen = ckpt["gen"] + 1
+            rng = ckpt["rng"]
+            evo_state = ckpt["evo_state"]
+            self.mu1 = ckpt["mu1"]
+            self.mu2 = ckpt["mu2"]
+            self.v_ref_shaper = ckpt["v_ref_shaper"]
+            self.v_ref_opponent = ckpt["v_ref_opponent"]
+            log = ckpt["log"]
+            print(
+                f"[Resume] Resuming from generation {start_gen}/{num_iters}"
+                f"  mu1={self.mu1:.4f}  mu2={self.mu2:.4f}"
+            )
+
+        for gen in range(start_gen, num_iters):
             rng, rng_run, rng_evo, rng_key = jax.random.split(rng, 4)
 
             # Ask ES for candidate parameters
@@ -547,6 +619,22 @@ class WelfareEvoRunner:
                     wandb.save(log_savepath)
                 else:
                     print(f"Saving iteration {gen} locally")
+
+                # Save resume data alongside the existing generation file
+                resume_savepath = os.path.join(self.save_dir, f"generation_{gen}_resume")
+                resume_data = {
+                    "gen": gen,
+                    "rng": rng,
+                    "evo_state": evo_state,
+                    "mu1": self.mu1,
+                    "mu2": self.mu2,
+                    "v_ref_shaper": self.v_ref_shaper,
+                    "v_ref_opponent": self.v_ref_opponent,
+                    "log": log,
+                    "wandb_run_id": wandb.run.id if wandb.run else None,
+                }
+                with open(resume_savepath, "wb") as f:
+                    pickle.dump(resume_data, f, protocol=pickle.HIGHEST_PROTOCOL)
 
             if gen % log_interval == 0:
                 print(f"Generation: {gen}")

@@ -1,5 +1,7 @@
+import glob as glob_mod
 import logging
 import os
+import re
 from datetime import datetime
 from functools import partial
 
@@ -115,6 +117,34 @@ from pax.watchers import (
 # config.update('jax_disable_jit', True)
 
 
+def _get_wandb_run_id_from_resume(resume_dir):
+    """Scan *resume_dir* for the latest ``generation_*_resume`` file and
+    return the saved wandb run ID (or None)."""
+    if not resume_dir or not os.path.isdir(resume_dir):
+        return None
+    pattern = os.path.join(resume_dir, "**", "generation_*_resume")
+    candidates = glob_mod.glob(pattern, recursive=True)
+    if not candidates:
+        return None
+    best_gen = -1
+    best_path = None
+    for path in candidates:
+        match = re.search(r"generation_(\d+)_resume$", os.path.basename(path))
+        if match:
+            gen_num = int(match.group(1))
+            if gen_num > best_gen:
+                best_gen = gen_num
+                best_path = path
+    if best_path is None:
+        return None
+    from pax.utils import load
+    ckpt = load(best_path)
+    run_id = ckpt.get("wandb_run_id")
+    if run_id:
+        print(f"[Resume] Found wandb run ID '{run_id}' from generation {best_gen}")
+    return run_id
+
+
 def global_setup(args):
     """Set up global variables."""
     save_dir = f"{args.save_dir}/{str(datetime.now()).replace(' ', '_').replace(':', '.')}"
@@ -127,7 +157,14 @@ def global_setup(args):
         print("run name", str(args.wandb.name))
         if args.debug:
             args.wandb.group = "debug-" + args.wandb.group
-        run = wandb.init(
+
+        # Check if we should resume a previous wandb run
+        wandb_resume_id = None
+        resume_dir = getattr(getattr(args, 'welfare', None), 'resume_dir', "")
+        if resume_dir:
+            wandb_resume_id = _get_wandb_run_id_from_resume(resume_dir)
+
+        wandb_kwargs = dict(
             reinit=True,
             entity=str(args.wandb.entity),
             project=str(args.wandb.project),
@@ -140,6 +177,12 @@ def global_setup(args):
             ),  # type: ignore
             settings=wandb.Settings(code_dir="."),
         )
+        if wandb_resume_id:
+            wandb_kwargs["id"] = wandb_resume_id
+            wandb_kwargs["resume"] = "allow"
+            print(f"[Resume] Resuming wandb run {wandb_resume_id}")
+
+        run = wandb.init(**wandb_kwargs)
         print("run id", run.id)
         wandb.run.log_code(".")
     return save_dir

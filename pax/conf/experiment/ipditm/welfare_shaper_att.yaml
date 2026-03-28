@@ -42,6 +42,7 @@ welfare:
   calibration: False
   v_ref_shaper: 5.56
   v_ref_opponent: 5.56
+  resume_dir: ""           # persistent dir to scan for resume (empty = fresh start)
 
 # PPO agent parameters (for WelfareShaperAtt = agent1)
 ppo1:
