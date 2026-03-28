@@ -290,9 +290,10 @@ class WelfareEvoRunner:
 
             # ---- Compute per-member reward statistics ----
             # traj.rewards shape: [outer, inner, pop, opps, envs]
-            # Mean over outer, inner, opps, envs → per pop-member scalar
-            rewards_1_per_member = traj_1.rewards.mean(axis=(0, 1, 3, 4))
-            rewards_2_per_member = traj_2.rewards.mean(axis=(0, 1, 3, 4))
+            # Sum over inner (axis=1) to get per-episode rewards,
+            # then mean over outer, opps, envs → per pop-member scalar
+            rewards_1_per_member = traj_1.rewards.sum(axis=1).mean(axis=(0, 2, 3))
+            rewards_2_per_member = traj_2.rewards.sum(axis=1).mean(axis=(0, 2, 3))
             welfare_per_member = rewards_1_per_member + rewards_2_per_member
 
             # Env stats (same as EvoRunner)
