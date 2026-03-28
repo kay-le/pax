@@ -2,7 +2,7 @@
 # Unified launcher for W2 IPDITM welfare shaper att (self-play)
 #
 # Usage:
-#   bash W2_sp_ipditm_welfare_shaper_att_one.sh <platform> <seed>
+#   bash W2_sp_ipditm_welfare_shaper_att.sh <platform> <seed>
 #
 # Platforms:
 #   fir        — Fir cluster, 4×H100, ~3h wall time
@@ -10,9 +10,9 @@
 #   tri-debug  — Trillium, 1×H100, 1h, small params, runs twice to test resume
 #
 # Examples:
-#   bash W2_sp_ipditm_welfare_shaper_att_one.sh fir 21
-#   bash W2_sp_ipditm_welfare_shaper_att_one.sh tri 0
-#   bash W2_sp_ipditm_welfare_shaper_att_one.sh tri-debug 21
+#   bash W2_sp_ipditm_welfare_shaper_att.sh fir 21
+#   bash W2_sp_ipditm_welfare_shaper_att.sh tri 0
+#   bash W2_sp_ipditm_welfare_shaper_att.sh tri-debug 21
 
 PLATFORM=${1:-tri}
 SEED=${2:-0}
@@ -86,6 +86,9 @@ export WANDB_START_METHOD=thread
 
 EXPERIMENT="ipditm=welfare_shaper_att"
 RESUME_DIR="/scratch/lichenqi/resume/W2_sp_ipditm_seed${SEED}"
+HYDRA_DIR="$TMPDIR/hydra_output"
+# Hydra changes CWD to HYDRA_DIR inside Python, so save_dir ends up here:
+EXP_OUTPUT="$HYDRA_DIR/exp"
 mkdir -p "$RESUME_DIR"
 
 start_time=$(date +%s)
@@ -100,7 +103,7 @@ case "$PLATFORM" in
             seed=$SEED \
             ++num_devices=4 \
             ++welfare.resume_dir=$RESUME_DIR \
-            hydra.run.dir=$TMPDIR/hydra_output
+            hydra.run.dir=$HYDRA_DIR
         ;;
     tri-debug)
         # Debug run — small params, run TWICE to test save/resume
@@ -114,10 +117,13 @@ case "$PLATFORM" in
             ++num_devices=1 \
             ++save_interval=5 \
             ++welfare.resume_dir=$RESUME_DIR \
-            hydra.run.dir=$TMPDIR/hydra_output
+            hydra.run.dir=$HYDRA_DIR
 
         # Copy checkpoint to resume_dir so second run can find it
-        cp -rL ./exp/welfare-*/ "$RESUME_DIR/"
+        echo "Copying checkpoints from $EXP_OUTPUT to $RESUME_DIR ..."
+        cp -rL "$EXP_OUTPUT"/welfare-*/ "$RESUME_DIR/" 2>/dev/null
+        echo "Resume dir contents:"
+        find "$RESUME_DIR" -name "generation_*" | sort
 
         echo "=== Debug run 2/2 (testing resume) ==="
         python -m pax.experiment +experiment/$EXPERIMENT \
@@ -129,14 +135,15 @@ case "$PLATFORM" in
             ++num_devices=1 \
             ++save_interval=5 \
             ++welfare.resume_dir=$RESUME_DIR \
-            hydra.run.dir=$TMPDIR/hydra_output
+            hydra.run.dir=$HYDRA_DIR
         ;;
 esac
 
 # ──────────────────────────────────────────────────────────────────
 # Copy results to persistent storage
 # ──────────────────────────────────────────────────────────────────
-cp -rL ./exp/welfare-*/ "$RESUME_DIR/"
+echo "Copying final results to $RESUME_DIR ..."
+cp -rL "$EXP_OUTPUT"/welfare-*/ "$RESUME_DIR/" 2>/dev/null
 mkdir -p /scratch/lichenqi/wandb_saved
 cp -rL "$WANDB_DIR"/wandb/offline-run-* /scratch/lichenqi/wandb_saved/ 2>/dev/null || true
 
