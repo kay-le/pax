@@ -66,7 +66,7 @@ fi
 module load StdEnv/2023 gcc/12.3
 module load cuda/12.6
 module load python/3.11.5
-source /home/lichenqi/pax_env_py3.11.5/bin/activate
+source /project/def-jtyao/lichenqi/pax_env_py3.11.5/bin/activate
 
 export TMPDIR="${SLURM_TMPDIR:-/tmp}"
 
@@ -94,7 +94,7 @@ mkdir -p "$RESUME_DIR"
 start_time=$(date +%s)
 echo "=== Platform: $PLATFORM | Seed: $SEED | $(date '+%Y-%m-%d %H:%M:%S') ==="
 
-cd /home/lichenqi/pax
+cd /project/def-jtyao/lichenqi/pax
 
 case "$PLATFORM" in
     fir|tri)
