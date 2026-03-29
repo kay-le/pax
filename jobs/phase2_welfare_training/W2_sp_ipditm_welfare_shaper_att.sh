@@ -29,7 +29,7 @@ if [ -z "$SLURM_JOB_ID" ]; then
                 --gpus-per-node=h100:4 \
                 --cpus-per-task=12 \
                 --mem=20G \
-                --time=3:00:00 \
+                --time=4:00:00 \
                 --output=/scratch/lichenqi/output/%x-%N-%j.out \
                 "$0" "$@"
             ;;
@@ -107,10 +107,12 @@ case "$PLATFORM" in
         ;;
     tri-debug)
         # Debug run — small params, run TWICE to test save/resume
-        echo "=== Debug run 1/2 ==="
+        # Run 1: 6 generations (0-5), saves at 0 and 5
+        # Run 2: 11 generations total, resumes from 5, trains 6-10
+        echo "=== Debug run 1/2 (gen 0-5) ==="
         python -m pax.experiment +experiment/$EXPERIMENT \
             seed=$SEED \
-            ++num_iters=10 \
+            ++num_iters=6 \
             ++popsize=40 \
             ++num_outer_steps=20 \
             ++num_inner_steps=80 \
@@ -125,10 +127,10 @@ case "$PLATFORM" in
         echo "Resume dir contents:"
         find "$RESUME_DIR" -name "generation_*" | sort
 
-        echo "=== Debug run 2/2 (testing resume) ==="
+        echo "=== Debug run 2/2 (gen 6-10, testing resume) ==="
         python -m pax.experiment +experiment/$EXPERIMENT \
             seed=$SEED \
-            ++num_iters=10 \
+            ++num_iters=11 \
             ++popsize=40 \
             ++num_outer_steps=20 \
             ++num_inner_steps=80 \
