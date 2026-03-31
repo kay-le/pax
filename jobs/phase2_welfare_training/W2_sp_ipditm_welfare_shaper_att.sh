@@ -28,7 +28,7 @@ if [ -z "$SLURM_JOB_ID" ]; then
                 --job-name=W2sp_ipditm_s${SEED} \
                 --gpus-per-node=h100:4 \
                 --cpus-per-task=12 \
-                --mem=20G \
+                --mem=30G \   # 20G memory was not enough for 1GPU in debug, 30G worked in debug.50G worked with 4gpu in production.
                 --time=4:00:00 \
                 --output=/scratch/lichenqi/output/%x-%N-%j.out \
                 "$0" "$@"

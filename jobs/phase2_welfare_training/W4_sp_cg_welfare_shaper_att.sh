@@ -28,7 +28,7 @@ if [ -z "$SLURM_JOB_ID" ]; then
                 --job-name=W4sp_cg_s${SEED} \
                 --gpus-per-node=h100:4 \
                 --cpus-per-task=12 \
-                --mem=20G \
+                --mem=30G \
                 --time=4:00:00 \
                 --output=/scratch/lichenqi/output/%x-%N-%j.out \
                 "$0" "$@"

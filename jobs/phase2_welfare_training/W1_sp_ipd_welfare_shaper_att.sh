@@ -26,10 +26,10 @@ if [ -z "$SLURM_JOB_ID" ]; then
             sbatch \
                 --account=def-jtyao_gpu \
                 --job-name=W1sp_ipd_s${SEED} \
-                --gpus-per-node=h100:4 \
-                --cpus-per-task=12 \
+                --gpus-per-node=h100:1 \
+                --cpus-per-task=6 \
                 --mem=20G \
-                --time=4:00:00 \
+                --time=3:00:00 \
                 --output=/scratch/lichenqi/output/%x-%N-%j.out \
                 "$0" "$@"
             ;;
@@ -37,8 +37,8 @@ if [ -z "$SLURM_JOB_ID" ]; then
             sbatch \
                 --account=def-jtyao \
                 --job-name=W1sp_ipd_s${SEED} \
-                --gpus-per-node=h100:4 \
-                --time=1-20:00:00 \
+                --gpus-per-node=h100:1 \
+                --time=3:00:00 \
                 --output=/scratch/lichenqi/output/%x-%N-%j.out \
                 "$0" "$@"
             ;;
@@ -101,7 +101,7 @@ case "$PLATFORM" in
         # Full training run — uses config defaults (num_iters, popsize, etc.)
         python -m pax.experiment +experiment/$EXPERIMENT \
             seed=$SEED \
-            ++num_devices=4 \
+            ++num_devices=1 \
             ++welfare.resume_dir=$RESUME_DIR \
             hydra.run.dir=$HYDRA_DIR
         ;;

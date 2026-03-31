@@ -1,7 +1,7 @@
 """Welfare-maximising Evolutionary Runner with Lagrangian IR constraints.
 
-Objective:
-    max_theta  E[ sum_e W^e ]   where  W^e = sum_t (r_i^{e,t} + r_{-i}^{e,t})
+Objective (Nash welfare):
+    max_theta  E[ log(R_1) + log(R_2) ]
 
 IR constraints (enforced via dual ascent):
     E[ mean_e R_i^e ]  >= v_bar_i      (shaper IR)
@@ -297,7 +297,13 @@ class WelfareEvoRunner:
             # then mean over outer, opps, envs → per pop-member scalar
             rewards_1_per_member = traj_1.rewards.sum(axis=1).mean(axis=(0, 2, 3))
             rewards_2_per_member = traj_2.rewards.sum(axis=1).mean(axis=(0, 2, 3))
-            welfare_per_member = rewards_1_per_member + rewards_2_per_member
+            # Nash welfare: W = log(R1) + log(R2)
+            # Clamp to small positive value to avoid log(0) or log(negative)
+            _eps = 1e-6
+            welfare_per_member = (
+                jnp.log(jnp.maximum(rewards_1_per_member, _eps))
+                + jnp.log(jnp.maximum(rewards_2_per_member, _eps))
+            )
 
             # Env stats (same as EvoRunner)
             if args.env_id == "coin_game":
