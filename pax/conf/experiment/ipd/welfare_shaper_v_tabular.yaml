@@ -4,7 +4,8 @@
 # Maximises joint welfare with IR constraints via Lagrangian dual ascent.
 
 # Agents
-agent1: 'WelfareShaperAtt' #shaper  architecture
+#TODO double check the agent1 class 
+agent1: 'WelfareShaper' #shaper  architecture
 agent2: 'Tabular'
 
 # Environment
