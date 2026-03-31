@@ -28,8 +28,8 @@ if [ -z "$SLURM_JOB_ID" ]; then
                 --job-name=W2sp_ipditm_s${SEED} \
                 --gpus-per-node=h100:4 \
                 --cpus-per-task=12 \
-                --mem=20G \
-                --time=4:00:00 \
+                --mem=50G \
+                --time=6:30:00 \
                 --output=/scratch/lichenqi/output/%x-%N-%j.out \
                 "$0" "$@"
             ;;
