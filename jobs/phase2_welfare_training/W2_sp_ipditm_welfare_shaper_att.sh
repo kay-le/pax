@@ -28,8 +28,8 @@ if [ -z "$SLURM_JOB_ID" ]; then
                 --job-name=W2sp_ipditm_s${SEED} \
                 --gpus-per-node=h100:4 \
                 --cpus-per-task=12 \
-                --mem=30G \   # 20G memory was not enough for 1GPU in debug, 30G worked in debug.50G worked with 4gpu in production.
-                --time=4:00:00 \
+                --mem=50G \
+                --time=6:59:00 \
                 --output=/scratch/lichenqi/output/%x-%N-%j.out \
                 "$0" "$@"
             ;;
@@ -38,7 +38,7 @@ if [ -z "$SLURM_JOB_ID" ]; then
                 --account=def-jtyao \
                 --job-name=W2sp_ipditm_s${SEED} \
                 --gpus-per-node=h100:4 \
-                --time=1-20:00:00 \
+                --time=7:00:00 \
                 --output=/scratch/lichenqi/output/%x-%N-%j.out \
                 "$0" "$@"
             ;;
@@ -49,12 +49,11 @@ if [ -z "$SLURM_JOB_ID" ]; then
                 --gpus-per-node=h100:1 \
                 --cpus-per-task=6 \
                 --time=1:00:00 \
-                --output=/scratch/lichenqi/%x-%N-%j.out \
+                --output=/scratch/lichenqi/debug_output/%x-%N-%j.out \
                 "$0" "$@"
             ;;
         *)
-            echo "ERROR: Unknown platform '$PLATFORM'. Use: fir, tri, tri-debug"
-            exit 1
+            echo "platform '$PLATFORM'. Use: fir, tri, tri-debug or fir-debug"
             ;;
     esac
     exit $?
@@ -98,36 +97,27 @@ cd /project/def-jtyao/lichenqi/pax
 
 case "$PLATFORM" in
     fir|tri)
-        # Full training run — uses config defaults (5000 iters, popsize 128, etc.)
         python -m pax.experiment +experiment/$EXPERIMENT \
             seed=$SEED \
             ++num_devices=4 \
             ++welfare.resume_dir=$RESUME_DIR \
             hydra.run.dir=$HYDRA_DIR
+        # ──────────────────────────────────────────────────────────────────
+        # Copy results to persistent storage
+        # ──────────────────────────────────────────────────────────────────
+        echo "Copying final results to $RESUME_DIR ..."
+        cp -rL "$EXP_OUTPUT"/welfare-*/ "$RESUME_DIR/" 2>/dev/null
+        mkdir -p /scratch/lichenqi/wandb_saved
+        cp -rL "$WANDB_DIR"/wandb/offline-run-* /scratch/lichenqi/wandb_saved/ 2>/dev/null || true
+
+        end_time=$(date +%s)
+        echo "=== Done: $PLATFORM seed=$SEED | Elapsed: $((end_time - start_time))s ==="
         ;;
-    tri-debug)
+    tri-debug|fir-debug)
         # Debug run — small params, run TWICE to test save/resume
         # Run 1: 6 generations (0-5), saves at 0 and 5
         # Run 2: 11 generations total, resumes from 5, trains 6-10
         echo "=== Debug run 1/2 (gen 0-5) ==="
-        python -m pax.experiment +experiment/$EXPERIMENT \
-            seed=$SEED \
-            ++num_iters=6 \
-            ++popsize=40 \
-            ++num_outer_steps=20 \
-            ++num_inner_steps=80 \
-            ++num_devices=1 \
-            ++save_interval=5 \
-            ++welfare.resume_dir=$RESUME_DIR \
-            hydra.run.dir=$HYDRA_DIR
-
-        # Copy checkpoint to resume_dir so second run can find it
-        echo "Copying checkpoints from $EXP_OUTPUT to $RESUME_DIR ..."
-        cp -rL "$EXP_OUTPUT"/welfare-*/ "$RESUME_DIR/" 2>/dev/null
-        echo "Resume dir contents:"
-        find "$RESUME_DIR" -name "generation_*" | sort
-
-        echo "=== Debug run 2/2 (gen 6-10, testing resume) ==="
         python -m pax.experiment +experiment/$EXPERIMENT \
             seed=$SEED \
             ++num_iters=11 \
@@ -138,16 +128,23 @@ case "$PLATFORM" in
             ++save_interval=5 \
             ++welfare.resume_dir=$RESUME_DIR \
             hydra.run.dir=$HYDRA_DIR
+
+        # Copy checkpoint to resume_dir so second run can find it
+        echo "Copying checkpoints from $EXP_OUTPUT to $RESUME_DIR ..."
+        cp -rL "$EXP_OUTPUT"/welfare-*/ "$RESUME_DIR/debug" 2>/dev/null
+        echo "Resume dir contents:"
+        find "$RESUME_DIR" -name "generation_*" | sort
+
+        echo "=== Debug run 2/2 (gen 6-10, testing resume) ==="
+        python -m pax.experiment +experiment/$EXPERIMENT \
+            seed=$SEED \
+            ++num_iters=21 \
+            ++popsize=40 \
+            ++num_outer_steps=20 \
+            ++num_inner_steps=80 \
+            ++num_devices=1 \
+            ++save_interval=5 \
+            ++welfare.resume_dir=$RESUME_DIR \
+            hydra.run.dir=$HYDRA_DIR
         ;;
 esac
-
-# ──────────────────────────────────────────────────────────────────
-# Copy results to persistent storage
-# ──────────────────────────────────────────────────────────────────
-echo "Copying final results to $RESUME_DIR ..."
-cp -rL "$EXP_OUTPUT"/welfare-*/ "$RESUME_DIR/" 2>/dev/null
-mkdir -p /scratch/lichenqi/wandb_saved
-cp -rL "$WANDB_DIR"/wandb/offline-run-* /scratch/lichenqi/wandb_saved/ 2>/dev/null || true
-
-end_time=$(date +%s)
-echo "=== Done: $PLATFORM seed=$SEED | Elapsed: $((end_time - start_time))s ==="
