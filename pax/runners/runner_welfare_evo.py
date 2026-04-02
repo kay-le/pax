@@ -708,10 +708,10 @@ class WelfareEvoRunner:
 
             if watchers:
                 wandb_log = {
-                    "train/reward_per_episode/player_1": float(rewards_1),
-                    "train/reward_per_episode/player_2": float(rewards_2),
-                    "train/reward_per_timestep/player_1": float(rewards_1) / self.args.num_inner_steps,
-                    "train/reward_per_timestep/player_2": float(rewards_2) / self.args.num_inner_steps,
+                    "train/reward_per_episode/player_1": float(rewards_1.mean()),
+                    "train/reward_per_episode/player_2": float(rewards_2.mean()),
+                    "train/reward_per_timestep/player_1": float(rewards_1.mean()) / self.args.num_inner_steps,
+                    "train/reward_per_timestep/player_2": float(rewards_2.mean()) / self.args.num_inner_steps,
                     "train_iteration": gen,
                     "train/welfare/mean": float(welfare_per_member.mean()),
                     "train/fitness/lagrangian": float(fitness.mean()),
