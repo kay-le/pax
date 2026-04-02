@@ -106,7 +106,7 @@ case "$PLATFORM" in
         # Copy results to persistent storage
         # ──────────────────────────────────────────────────────────────────
         echo "Copying final results to $RESUME_DIR ..."
-        cp -rL "$EXP_OUTPUT"/Welfare-*/ "$RESUME_DIR/" 2>/dev/null
+        cp -rL "$EXP_OUTPUT"/welfare-*/ "$RESUME_DIR/" 2>/dev/null
         mkdir -p /scratch/lichenqi/wandb_saved
         cp -rL "$WANDB_DIR"/wandb/offline-run-* /scratch/lichenqi/wandb_saved/ 2>/dev/null || true
 
@@ -131,7 +131,7 @@ case "$PLATFORM" in
 
         # Copy checkpoint to resume_dir so second run can find it
         echo "Copying checkpoints from $EXP_OUTPUT to $RESUME_DIR ..."
-        cp -rL "$EXP_OUTPUT"/Welfare-*/ "$RESUME_DIR/debug" 2>/dev/null
+        cp -rL "$EXP_OUTPUT"/welfare-*/ "$RESUME_DIR/debug" 2>/dev/null
         echo "Resume dir contents:"
         find "$RESUME_DIR" -name "generation_*" | sort
 

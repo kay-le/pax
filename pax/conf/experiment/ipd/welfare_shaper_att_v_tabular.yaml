@@ -43,7 +43,7 @@ welfare:
   rho_max: 50
   mu1: 0.0
   mu2: 0.0
-  dual_lr: 0.005 #has to smaller than es lrate to ensure convergence
+  dual_lr: 0.002 #has to smaller than es lrate to ensure convergence
   calibration: False
   v_ref_shaper: -200.0 #episodic return
   v_ref_opponent: -200.0
@@ -103,7 +103,7 @@ es:
   clip_max: 1e10
   lrate_init: 0.01
   lrate_decay: 0.9999
-  lrate_limit: 0.001
+  lrate_limit: 0.01 #chaned from 0.001 to 0.01 
   beta_1: 0.99
   beta_2: 0.999
   eps: 1e-8
