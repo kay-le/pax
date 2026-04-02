@@ -113,7 +113,7 @@ es:
 wandb:
   entity: "lichenqi-university-of-regina"
   project: ipd
-  group: '${agent1}-vs-${agent2}'
+  group: 'welfare-${agent1}-vs-${agent2}'
   name: run-seed-${seed}-pop-size-${popsize}
   log: True
   mode: offline

@@ -98,6 +98,14 @@ class WelfareEvoRunner:
             self.v_ref_shaper = args.welfare.v_ref_shaper
             self.v_ref_opponent = args.welfare.v_ref_opponent
 
+        self.rho = args.welfare.rho                    # e.g. 1.0
+        self.rho_max = args.welfare.rho_max            # e.g. 100.0
+        self.rho_multiplier = args.welfare.rho_schedule # e.g. 1.5
+        self.rho_patience = args.welfare.rho_patience  # e.g. 50 generations
+        self.violation_counter = 0
+
+        
+
         # ------------------------------------------------------------------
         # Vmap the environment (same pattern as EvoRunner)
         # ------------------------------------------------------------------
@@ -297,12 +305,10 @@ class WelfareEvoRunner:
             # then mean over outer, opps, envs → per pop-member scalar
             rewards_1_per_member = traj_1.rewards.sum(axis=1).mean(axis=(0, 2, 3))
             rewards_2_per_member = traj_2.rewards.sum(axis=1).mean(axis=(0, 2, 3))
-            # Nash welfare: W = log(R1) + log(R2)
-            # Clamp to small positive value to avoid log(0) or log(negative)
-            _eps = 1e-6
+            # Nash welfare: W = R1 + R2
             welfare_per_member = (
-                jnp.log(jnp.maximum(rewards_1_per_member+400, _eps))
-                + jnp.log(jnp.maximum(rewards_2_per_member+400, _eps))
+                rewards_1_per_member
+                + rewards_2_per_member
             )
 
             # Env stats (same as EvoRunner)
@@ -538,6 +544,8 @@ class WelfareEvoRunner:
             self.mu2 = ckpt["mu2"]
             self.v_ref_shaper = ckpt["v_ref_shaper"]
             self.v_ref_opponent = ckpt["v_ref_opponent"]
+            self.rho = ckpt["rho"]
+            self.violation_counter = ckpt["violation_counter"]
             log = ckpt["log"]
             print(
                 f"[Resume] Resuming from generation {start_gen}/{num_iters}"
@@ -580,10 +588,14 @@ class WelfareEvoRunner:
 
             # ---- Lagrangian fitness ----
             # L = welfare + mu1*(R1 - v_ref_1) + mu2*(R2 - v_ref_2)
+            slack_1 = r1_per_member - self.v_ref_shaper
+            slack_2 = r2_per_member - self.v_ref_opponent   
             fitness = (
                 welfare_per_member
-                + self.mu1 * (r1_per_member - self.v_ref_shaper)
-                + self.mu2 * (r2_per_member - self.v_ref_opponent)
+                + self.mu1 * slack_1
+                + self.mu2 * slack_2
+                - (self.rho / 2.0) * jnp.maximum(0.0, -slack_1)**2
+                - (self.rho / 2.0) * jnp.maximum(0.0, -slack_2)**2
             )
 
             # ---- Dual ascent on multipliers ----
@@ -592,6 +604,20 @@ class WelfareEvoRunner:
             # mu_k <- max(0, mu_k - alpha * (R_k_bar - v_ref_k))
             self.mu1 = max(0.0, self.mu1 - self.dual_lr * (mean_r1 - self.v_ref_shaper))
             self.mu2 = max(0.0, self.mu2 - self.dual_lr * (mean_r2 - self.v_ref_opponent))
+
+            # After dual ascent update each generation
+            shaper_violated = mean_r1 < self.v_ref_shaper
+            opp_violated = mean_r2 < self.v_ref_opponent
+
+            if shaper_violated or opp_violated:
+                self.violation_counter += 1
+            else:
+                self.violation_counter = 0  # reset if feasible
+
+            if self.violation_counter >= self.rho_patience:
+                self.rho = min(self.rho * self.rho_multiplier, self.rho_max)
+                self.violation_counter = 0  # reset counter after increase
+                print(f"[Lagrangian] rho increased to {self.rho:.4f}")
 
             # ---- ES tell ----
             fitness_re = fit_shaper.apply(x, fitness)
@@ -636,6 +662,8 @@ class WelfareEvoRunner:
                     "mu2": self.mu2,
                     "v_ref_shaper": self.v_ref_shaper,
                     "v_ref_opponent": self.v_ref_opponent,
+                    "rho": self.rho,
+                    "violation_counter": self.violation_counter,
                     "log": log,
                     "wandb_run_id": wandb.run.id if wandb.run else None,
                 }
@@ -680,6 +708,10 @@ class WelfareEvoRunner:
 
             if watchers:
                 wandb_log = {
+                    "train/reward_per_episode/player_1": float(rewards_1),
+                    "train/reward_per_episode/player_2": float(rewards_2),
+                    "train/reward_per_timestep/player_1": float(rewards_1) / self.args.num_inner_steps,
+                    "train/reward_per_timestep/player_2": float(rewards_2) / self.args.num_inner_steps,
                     "train_iteration": gen,
                     "train/welfare/mean": float(welfare_per_member.mean()),
                     "train/fitness/lagrangian": float(fitness.mean()),
@@ -702,12 +734,8 @@ class WelfareEvoRunner:
                     "train/time/seconds": float(
                         (time.time() - self.start_time)
                     ),
-                    "train/reward_per_episode/player_1": float(
-                        rewards_1.mean()
-                    ),
-                    "train/reward_per_episode/player_2": float(
-                        rewards_2.mean()
-                    ),
+                    "train/lagrangian/rho": self.rho,
+                    "train/lagrangian/violation_counter": self.violation_counter,
                 }
                 wandb_log.update(env_stats)
                 for idx, (overall_fitness, gen_fitness) in enumerate(

@@ -145,7 +145,7 @@ esac
 # Copy results to persistent storage
 # ──────────────────────────────────────────────────────────────────
 echo "Copying final results to $RESUME_DIR ..."
-cp -rL "$EXP_OUTPUT"/Welfare-*/ "$RESUME_DIR/" 2>/dev/null
+cp -rL "$EXP_OUTPUT"/welfare-*/ "$RESUME_DIR/" 2>/dev/null
 mkdir -p /scratch/lichenqi/wandb_saved
 cp -rL "$WANDB_DIR"/wandb/offline-run-* /scratch/lichenqi/wandb_saved/ 2>/dev/null || true
 
