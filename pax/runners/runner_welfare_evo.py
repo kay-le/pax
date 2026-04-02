@@ -302,7 +302,7 @@ class WelfareEvoRunner:
             _eps = 1e-6
             welfare_per_member = (
                 jnp.log(jnp.maximum(rewards_1_per_member+400, _eps))
-                + jnp.log(jnp.maximum(rewards_2_per_member, _eps))
+                + jnp.log(jnp.maximum(rewards_2_per_member+400, _eps))
             )
 
             # Env stats (same as EvoRunner)
