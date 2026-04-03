@@ -37,7 +37,8 @@ att_type: 'att'
 
 # Welfare / Lagrangian config
 welfare:
-  rho: 1.0
+  rho1: 1.0
+  rho2: 1.0
   rho_schedule: 1.5
   rho_patience: 30
   rho_max: 50
