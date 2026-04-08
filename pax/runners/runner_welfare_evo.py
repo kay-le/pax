@@ -307,10 +307,15 @@ class WelfareEvoRunner:
             # then mean over outer, opps, envs → per pop-member scalar
             rewards_1_per_member = traj_1.rewards.sum(axis=1).mean(axis=(0, 2, 3))
             rewards_2_per_member = traj_2.rewards.sum(axis=1).mean(axis=(0, 2, 3))
-            # Nash welfare: W = R1 + R2
+            # utilitarian welfare: W = R1 + R2
+            # welfare_per_member = ( rewards_1_per_member + rewards_2_per_member)
+
+            # Nash welfare: W = log(R1 + shift) + log(R2 + shift)
+            _shift = 100.0  # make this a config param: args.welfare.reward_shift
+            _eps = 1e-6
             welfare_per_member = (
-                rewards_1_per_member
-                + rewards_2_per_member
+                jnp.log(jnp.maximum(rewards_1_per_member + _shift, _eps))
+                + jnp.log(jnp.maximum(rewards_2_per_member + _shift, _eps))
             )
 
             # Env stats (same as EvoRunner)
@@ -594,12 +599,21 @@ class WelfareEvoRunner:
             # L = welfare + mu1*(R1 - v_ref_1) + mu2*(R2 - v_ref_2)
             slack_1 = r1_per_member - self.v_ref_shaper
             slack_2 = r2_per_member - self.v_ref_opponent   
+            # fitness = (
+            #     welfare_per_member
+            #     + self.mu1 * slack_1
+            #     + self.mu2 * slack_2
+            #     - (self.rho1 / 2.0) * jnp.maximum(0.0, -slack_1)**2
+            #     - (self.rho2 / 2.0) * jnp.maximum(0.0, -slack_2)**2
+            # )
+#---------------------------------------Nash welfare---
+            _shift = 100.0
             fitness = (
                 welfare_per_member
-                + self.mu1 * slack_1
-                + self.mu2 * slack_2
-                - (self.rho1 / 2.0) * jnp.maximum(0.0, -slack_1)**2
-                - (self.rho2 / 2.0) * jnp.maximum(0.0, -slack_2)**2
+                + self.mu1 * (slack_1 / _shift)
+                + self.mu2 * (slack_2 / _shift)
+                - (self.rho1 / 2.0) * (jnp.maximum(0.0, -slack_1) / _shift)**2
+                - (self.rho2 / 2.0) * (jnp.maximum(0.0, -slack_2) / _shift)**2
             )
 
             # ---- Dual ascent on multipliers ----
@@ -774,6 +788,6 @@ class WelfareEvoRunner:
                     lambda x: x.item() if isinstance(x, jax.Array) else x,
                     wandb_log,
                 )
-                wandb.log(wandb_log)
+                wandb.log(wandb_log, step=gen)
 
         return agents
