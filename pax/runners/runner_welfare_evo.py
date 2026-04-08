@@ -308,15 +308,15 @@ class WelfareEvoRunner:
             rewards_1_per_member = traj_1.rewards.sum(axis=1).mean(axis=(0, 2, 3))
             rewards_2_per_member = traj_2.rewards.sum(axis=1).mean(axis=(0, 2, 3))
             # utilitarian welfare: W = R1 + R2
-            # welfare_per_member = ( rewards_1_per_member + rewards_2_per_member)
+            welfare_per_member = ( rewards_1_per_member + rewards_2_per_member)
 
             # Nash welfare: W = log(R1 + shift) + log(R2 + shift)
-            _shift = 100.0  # make this a config param: args.welfare.reward_shift
-            _eps = 1e-6
-            welfare_per_member = (
-                jnp.log(jnp.maximum(rewards_1_per_member + _shift, _eps))
-                + jnp.log(jnp.maximum(rewards_2_per_member + _shift, _eps))
-            )
+            # _shift = 100.0  # make this a config param: args.welfare.reward_shift
+            # _eps = 1e-6
+            # welfare_per_member = (
+            #     jnp.log(jnp.maximum(rewards_1_per_member + _shift, _eps))
+            #     + jnp.log(jnp.maximum(rewards_2_per_member + _shift, _eps))
+            # )
 
             # Env stats (same as EvoRunner)
             if args.env_id == "coin_game":

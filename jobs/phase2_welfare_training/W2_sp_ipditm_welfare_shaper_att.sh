@@ -29,7 +29,7 @@ if [ -z "$SLURM_JOB_ID" ]; then
                 --gpus-per-node=h100:4 \
                 --cpus-per-task=6 \
                 --mem=20G \
-                --time=6:59:00 \
+                --time=9:20:00 \
                 --output=/scratch/lichenqi/output/%x-%N-%j.out \
                 "$0" "$@"
             ;;
