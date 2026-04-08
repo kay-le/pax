@@ -40,7 +40,7 @@ welfare:
   rho2: 1.0             # quadratic penalty coefficient (opponent)
   rho_schedule: 1.5     # NEW: multiply rho by this if constraint violated for N consecutive gens
   rho_patience: 30
-  rho_max: 50
+  rho_max: 400
   mu1: 0.0
   mu2: 0.0
   dual_lr: 0.01
