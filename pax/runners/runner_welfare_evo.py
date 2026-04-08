@@ -599,22 +599,22 @@ class WelfareEvoRunner:
             # L = welfare + mu1*(R1 - v_ref_1) + mu2*(R2 - v_ref_2)
             slack_1 = r1_per_member - self.v_ref_shaper
             slack_2 = r2_per_member - self.v_ref_opponent   
-            # fitness = (
-            #     welfare_per_member
-            #     + self.mu1 * slack_1
-            #     + self.mu2 * slack_2
-            #     - (self.rho1 / 2.0) * jnp.maximum(0.0, -slack_1)**2
-            #     - (self.rho2 / 2.0) * jnp.maximum(0.0, -slack_2)**2
-            # )
-#---------------------------------------Nash welfare---
-            _shift = 100.0
             fitness = (
                 welfare_per_member
-                + self.mu1 * (slack_1 / _shift)
-                + self.mu2 * (slack_2 / _shift)
-                - (self.rho1 / 2.0) * (jnp.maximum(0.0, -slack_1) / _shift)**2
-                - (self.rho2 / 2.0) * (jnp.maximum(0.0, -slack_2) / _shift)**2
+                + self.mu1 * slack_1
+                + self.mu2 * slack_2
+                - (self.rho1 / 2.0) * jnp.maximum(0.0, -slack_1)**2
+                - (self.rho2 / 2.0) * jnp.maximum(0.0, -slack_2)**2
             )
+#---------------------------------------Nash welfare---
+            # _shift = 100.0
+            # fitness = (
+            #     welfare_per_member
+            #     + self.mu1 * (slack_1 / _shift)
+            #     + self.mu2 * (slack_2 / _shift)
+            #     - (self.rho1 / 2.0) * (jnp.maximum(0.0, -slack_1) / _shift)**2
+            #     - (self.rho2 / 2.0) * (jnp.maximum(0.0, -slack_2) / _shift)**2
+            # )
 
             # ---- Dual ascent on multipliers ----
             mean_r1 = float(r1_per_member.mean()) # mean over population → scalar, it is still episode return averaged over all envs, opps, outer steps
