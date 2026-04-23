@@ -31,7 +31,8 @@ num_opps: 1
 num_devices: 4
 num_outer_steps: 600
 num_inner_steps: 16
-num_iters: 3000
+num_iters: 3001
+att_type: 'att'
 
 # Evaluation
 run_path: ucl-dark/cg/z0ckvwtf
@@ -111,7 +112,7 @@ es:
 wandb:
   entity: "lichenqi-university-of-regina"
   project: cg
-  group: 'shaping-${agent1}-vs-${agent2}'
+  group: 'baseline-shaping-${agent1}-vs-${agent2}'
   name: run-seed-${seed}
   log: True
   mode: offline

@@ -23,6 +23,7 @@ benchmark: False
 # Runner
 runner: welfare_evo
 
+
 # Training
 top_k: 4
 popsize: 1000
@@ -31,7 +32,7 @@ num_opps: 1
 num_devices: 4
 num_outer_steps: 600
 num_inner_steps: 16
-num_iters: 3000
+num_iters: 3001
 att_type: 'att'
 
 
