@@ -640,6 +640,10 @@ class EvoRunner:
                 print()
 
             if watchers:
+                r1_mean = float(rewards_1.mean())
+                r2_mean = float(rewards_2.mean())
+                r1_per_episode = r1_mean * self.args.num_inner_steps
+                r2_per_episode = r2_mean * self.args.num_inner_steps
                 wandb_log = {
                     "train_iteration": gen,
                     "train/fitness/player_1": float(fitness.mean()),
@@ -655,12 +659,11 @@ class EvoRunner:
                     "train/time/seconds": float(
                         (time.time() - self.start_time)
                     ),
-                    "train/reward_per_timestep/player_1": float(
-                        rewards_1.mean()
-                    ),
-                    "train/reward_per_timestep/player_2": float(
-                        rewards_2.mean()
-                    ),
+                    "train/reward_per_timestep/player_1": r1_mean,
+                    "train/reward_per_timestep/player_2": r2_mean,
+                    "train/reward_per_episode/player_1": r1_per_episode,
+                    "train/reward_per_episode/player_2": r2_per_episode,
+                    "train/welfare/mean": r1_per_episode + r2_per_episode,
                 }
                 wandb_log.update(env_stats)
                 # loop through population
@@ -687,6 +690,6 @@ class EvoRunner:
                     lambda x: x.item() if isinstance(x, jax.Array) else x,
                     wandb_log,
                 )
-                wandb.log(wandb_log)
+                wandb.log(wandb_log, step=gen)
 
         return agents

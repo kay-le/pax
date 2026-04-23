@@ -32,7 +32,7 @@ num_opps: 1
 num_devices: 4
 num_outer_steps: 500
 num_inner_steps: 152 
-num_iters: 1301
+num_iters: 1301 #1000
 att_type: avg
 
 # Evaluation
