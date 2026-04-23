@@ -160,7 +160,10 @@ def global_setup(args):
 
         # Check if we should resume a previous wandb run
         wandb_resume_id = None
+        # Try welfare.resume_dir first (welfare_evo runner), then top-level resume_dir (evo runner)
         resume_dir = getattr(getattr(args, 'welfare', None), 'resume_dir', "")
+        if not resume_dir:
+            resume_dir = getattr(args, 'resume_dir', "")
         if resume_dir:
             wandb_resume_id = _get_wandb_run_id_from_resume(resume_dir)
 
