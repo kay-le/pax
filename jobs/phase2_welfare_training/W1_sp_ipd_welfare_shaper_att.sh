@@ -26,10 +26,10 @@ if [ -z "$SLURM_JOB_ID" ]; then
             sbatch \
                 --account=def-jtyao_gpu \
                 --job-name=W1sp_ipd_s${SEED} \
-                --gpus-per-node=h100:1 \
+                --gpus=nvidia_h100_80gb_hbm3_1g.10gb:1 \
                 --cpus-per-task=6 \
-                --mem=20G \
-                --time=3:00:00 \
+                --mem=15G \
+                --time=2:00:00 \
                 --output=/scratch/lichenqi/output/%x-%N-%j.out \
                 "$0" "$@"
             ;;
