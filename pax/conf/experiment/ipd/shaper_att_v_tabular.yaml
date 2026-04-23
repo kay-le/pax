@@ -13,6 +13,9 @@ payoff: [[-1, -1], [-3, 0], [0, -3], [-2, -2]]
 # Runner 
 runner: evo_mixed_payoff
 
+# Resume (set to checkpoint dir to resume a previous run)
+resume_dir: ""
+
 # Training
 top_k: 5
 popsize: 1000
@@ -97,7 +100,7 @@ es:
 wandb:
   entity: "lichenqi-university-of-regina"
   project: ipd
-  group: 'EARL-${agent1}-vs-${agent2}'
+  group: 'baseline-${agent1}-vs-${agent2}'
   name: run-seed-${seed}
   log: True
   mode: offline
