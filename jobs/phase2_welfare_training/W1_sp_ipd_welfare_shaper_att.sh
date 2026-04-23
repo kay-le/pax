@@ -27,9 +27,9 @@ if [ -z "$SLURM_JOB_ID" ]; then
                 --account=def-jtyao_gpu \
                 --job-name=W1sp_ipd_s${SEED} \
                 --gpus=nvidia_h100_80gb_hbm3_1g.10gb:1 \
-                --cpus-per-task=6 \
-                --mem=15G \
-                --time=2:00:00 \
+                --cpus-per-task=2 \
+                --mem=4G \
+                --time=6:00:00 \
                 --output=/scratch/lichenqi/output/%x-%N-%j.out \
                 "$0" "$@"
             ;;
