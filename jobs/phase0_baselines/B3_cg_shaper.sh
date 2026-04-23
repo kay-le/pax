@@ -26,7 +26,7 @@ if [ -z "$SLURM_JOB_ID" ]; then
             sbatch \
                 --account=def-jtyao_gpu \
                 --job-name=B3_cg_s${SEED} \
-                --gpus-per-node=h100:4 \
+                --gpus=nvidia_h100_80gb_hbm3_2g.20gb:4 \
                 --cpus-per-task=6 \
                 --mem=20G \
                 --time=18:20:00 \
