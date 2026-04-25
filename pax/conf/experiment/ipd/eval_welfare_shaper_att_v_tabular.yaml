@@ -19,9 +19,9 @@ runner: welfare_eval
 # Training / Evaluation
 num_envs: 2
 num_opps: 10
-num_outer_steps: 100
+num_outer_steps: 100    # opponent learns over 100 inner episodes per trial
 num_inner_steps: 100
-num_iters: 1000
+num_iters: 1            # one trial per job — multi-seed via launcher (20 seeds)
 num_devices: 1
 att_type: 'att'
 agent2_reset_interval: 1
@@ -84,4 +84,3 @@ wandb:
   group: 'eval-welfare-${agent1}-vs-${agent2}'
   name: eval-seed-${seed}
   log: True
-  mode: offline

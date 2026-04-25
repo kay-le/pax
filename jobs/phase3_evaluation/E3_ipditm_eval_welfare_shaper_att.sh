@@ -1,18 +1,84 @@
 #!/bin/bash
-#SBATCH --account=def-jtyao_gpu
-#SBATCH --job-name=E3_ipditm_eval_welfare_att
-#SBATCH --gpus-per-node=h100:1
-#SBATCH --cpus-per-task=6
-#SBATCH --mem=16G
-#SBATCH --time=24:00:00
-#SBATCH --output=%x-%N-%j.out
+# Unified launcher for E3 IPDITM (STORM) welfare shaper att vs PPO_memory (evaluation)
+#
+# Usage:
+#   bash E3_ipditm_eval_welfare_shaper_att.sh <platform> <seed>
+#
+# Platforms:
+#   fir        — Fir cluster, 2g.20gb partial H100, 24h wall time
+#   tri        — Trillium cluster, 2g.20gb partial H100, 24h wall time
+#   tri-debug  — Trillium, 2g.20gb partial H100, 1h, smaller num_iters
+#
+# IMPORTANT: Update model_path and run_path in the eval yaml before running:
+#   pax/conf/experiment/ipditm/eval_welfare_shaper_att.yaml
+#
+# Examples:
+#   bash E3_ipditm_eval_welfare_shaper_att.sh fir 0
+#   bash E3_ipditm_eval_welfare_shaper_att.sh tri 0
+#   bash E3_ipditm_eval_welfare_shaper_att.sh tri-debug 0
 
-module load python/3.11.5
+PLATFORM=${1:-tri}
+SEED=${2:-0}
+
+# ──────────────────────────────────────────────────────────────────
+# Auto-submit: if not already running under SLURM, sbatch ourselves
+# ──────────────────────────────────────────────────────────────────
+if [ -z "$SLURM_JOB_ID" ]; then
+    case "$PLATFORM" in
+        fir)
+            sbatch \
+                --account=def-jtyao_gpu \
+                --job-name=E3_ipditm_eval_s${SEED} \
+                --gpus=nvidia_h100_80gb_hbm3_2g.20gb:1 \
+                --cpus-per-task=6 \
+                --mem=20G \
+                --time=1:00:00 \
+                --output=/scratch/lichenqi/eval/output/%x-%N-%j.out \
+                "$0" "$@"
+            ;;
+        tri)
+            sbatch \
+                --account=def-jtyao \
+                --job-name=E3_ipditm_eval_s${SEED} \
+                --gpus=nvidia_h100_80gb_hbm3_2g.20gb:1 \
+                --cpus-per-task=6 \
+                --mem=20G \
+                --time=24:00:00 \
+                --output=/scratch/lichenqi/output/%x-%N-%j.out \
+                "$0" "$@"
+            ;;
+        tri-debug)
+            sbatch \
+                --account=def-jtyao \
+                --job-name=E3_ipditm_eval_dbg_s${SEED} \
+                --gpus=nvidia_h100_80gb_hbm3_2g.20gb:1 \
+                --cpus-per-task=6 \
+                --mem=20G \
+                --time=1:00:00 \
+                --output=/scratch/lichenqi/debug_output/%x-%N-%j.out \
+                "$0" "$@"
+            ;;
+        *)
+            echo "platform '$PLATFORM'. Use: fir, tri, tri-debug"
+            ;;
+    esac
+    exit $?
+fi
+
+# ──────────────────────────────────────────────────────────────────
+# Actual job (running under SLURM from here)
+# ──────────────────────────────────────────────────────────────────
+module load StdEnv/2023 gcc/12.3
 module load cuda/12.6
-source /home/lichenqi/pax_env_py3.11.5/bin/activate
+module load python/3.11.5
+source /project/def-jtyao/lichenqi/pax_env_py3.11.5/bin/activate
+
+export TMPDIR="${SLURM_TMPDIR:-/tmp}"
+
+export MPLCONFIGDIR="$TMPDIR/matplotlib"
+mkdir -p "$MPLCONFIGDIR"
 
 export WANDB_API_KEY="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"
-export TMPDIR="${SLURM_TMPDIR:-/tmp}"
 mkdir -p "$TMPDIR/wandb" "$TMPDIR/wandb-cache" "$TMPDIR/wandb_config"
 
 export WANDB_DIR="$TMPDIR/wandb"
@@ -23,17 +89,30 @@ export WANDB__SERVICE_WAIT=180
 export WANDB_INIT_TIMEOUT=180
 export WANDB_START_METHOD=thread
 
-SEED=${1:-0}
 EXPERIMENT="ipditm=eval_welfare_shaper_att"
+HYDRA_DIR="$TMPDIR/hydra_output"
+
 start_time=$(date +%s)
-echo "Start E3 $EXPERIMENT: $(date '+%Y-%m-%d %H:%M:%S')"
+echo "=== Platform: $PLATFORM | Seed: $SEED | $(date '+%Y-%m-%d %H:%M:%S') ==="
 
-cd /home/lichenqi/pax
-# TODO: Update model_path and run_path in the yaml config before running
-python -m pax.experiment +experiment/$EXPERIMENT seed=$SEED
+cd /project/def-jtyao/lichenqi/pax
 
-mkdir -p "$HOME/wandb_saved"
-cp -r "$WANDB_DIR"/wandb/offline-run-* "$HOME/wandb_saved/" 2>/dev/null || true
-end_time=$(date +%s)
-echo "End E3 $EXPERIMENT: $(date '+%Y-%m-%d %H:%M:%S')"
-echo "Elapsed: $((end_time - start_time)) seconds"
+case "$PLATFORM" in
+    fir|tri)
+        python -m pax.experiment +experiment/$EXPERIMENT \
+            seed=$SEED \
+            hydra.run.dir=$HYDRA_DIR
+
+
+        end_time=$(date +%s)
+        echo "=== Done: $PLATFORM seed=$SEED | Elapsed: $((end_time - start_time))s ==="
+        ;;
+    tri-debug| fir-debug)
+        echo "=== Debug eval run (small num_iters) ==="
+        python -m pax.experiment +experiment/$EXPERIMENT \
+            seed=$SEED \
+            ++num_outer_steps=10 \
+            hydra.run.dir=$HYDRA_DIR \
+            ++project=debug_ipditm_eval
+        ;;
+esac

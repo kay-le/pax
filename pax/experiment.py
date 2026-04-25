@@ -93,6 +93,7 @@ from pax.envs.rice.sarl_rice import SarlRice
 from pax.runners.runner_evo_nroles import EvoRunnerNRoles
 from pax.runners.runner_weight_sharing import WeightSharingRunner
 from pax.runners.runner_ipditm_eval import IPDITMEvalRunner
+from pax.runners.runner_ipditm_eval_welfare import IPDITMEvalWelfareRunner
 
 from pax.runners.runner_marl import RLRunner
 from pax.runners.runner_marl_nplayer import NplayerRLRunner
@@ -362,6 +363,10 @@ def runner_setup(args, env, agents, save_dir, logger):
     elif args.runner == "ipditm_eval":
         logger.info("Evaluating with ipditmEvalRunner")
         return IPDITMEvalRunner(agents, env, save_dir, args)
+
+    elif args.runner == "ipditm_eval_welfare":
+        logger.info("Evaluating with IPDITMEvalWelfareRunner")
+        return IPDITMEvalWelfareRunner(agents, env, save_dir, args)
 
     elif args.runner == "welfare_eval":
         logger.info("Evaluating with WelfareEvalRunner")
@@ -993,6 +998,9 @@ def main(args):
         runner.run_loop(env_params, agent_pair, args.num_iters, watchers)
 
     elif args.runner == "ipditm_eval" or args.runner == "multishaper_eval":
+        runner.run_loop(env_params, agent_pair, watchers)
+
+    elif args.runner == "ipditm_eval_welfare":
         runner.run_loop(env_params, agent_pair, watchers)
 
     elif args.runner == "welfare_eval":

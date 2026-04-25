@@ -103,8 +103,7 @@ case "$PLATFORM" in
             seed=$SEED \
             hydra.run.dir=$HYDRA_DIR
 
-        mkdir -p /scratch/lichenqi/eval
-        cp -rL "$WANDB_DIR"/wandb/offline-run-* /scratch/lichenqi/eval/wandb_saved/ 2>/dev/null || true
+
 
         end_time=$(date +%s)
         echo "=== Done: $PLATFORM seed=$SEED | Elapsed: $((end_time - start_time))s ==="
@@ -113,7 +112,8 @@ case "$PLATFORM" in
         echo "=== Debug eval run (small num_iters) ==="
         python -m pax.experiment +experiment/$EXPERIMENT \
             seed=$SEED \
-            ++num_iters=10 \
-            hydra.run.dir=$HYDRA_DIR
+            ++num_outer_steps=10 \
+            hydra.run.dir=$HYDRA_DIR \
+            ++project=debug_cg_eval
         ;;
 esac
