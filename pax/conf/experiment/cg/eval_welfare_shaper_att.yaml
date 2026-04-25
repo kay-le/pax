@@ -37,8 +37,8 @@ num_iters: 1000
 # model_path: exp/welfare-WelfareShaperAtt-vs-PPO_memory/run-seed-6/2026-04-18_01.42.25.668174/generation_3000
 
 
-# run_path: lichenqi-university-of-regina/cg/runs/kjctsaf3
-# model_path: exp/welfare-WelfareShaperAtt-vs-PPO_memory/run-seed-5/2026-04-18_01.42.25.737442generation_3000
+run_path: lichenqi-university-of-regina/cg/kjctsaf3
+model_path: /scratch/lichenqi/wandb_saved/offline-run-20260418_014227-kjctsaf3/files/exp/welfare-WelfareShaperAtt-vs-PPO_memory/run-seed-5/2026-04-18_01.42.25.737442/generation_3000
 
 
 
