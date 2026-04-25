@@ -3,32 +3,37 @@
 # Evaluate a pretrained Welfare Shaper (Attention) vs fresh PPO_memory (Coin Game)
 # Freezes the shaper and lets the opponent learn over many episodes.
 
-# Agents
-agent1: 'WelfareShaperAtt'
+# Agents  
+agent1: 'PPO_memory' # same architecture as welfareShaperAtt
 agent2: 'PPO_memory'
 
 # Environment
 env_id: coin_game
-env_type: meta
+env_type: sequential
 egocentric: True
 env_discount: 0.96
 payoff: [[1, 1, -2], [1, 1, -2]]
 
+# Save
+save: True
+save_interval: 100
+benchmark: False
+gif: False
+
 # Runner
 runner: welfare_eval
 
-# Training / Evaluation
+# Training
+# total popsize = popsize * num_devices
 num_envs: 100
 num_opps: 1
-num_outer_steps: 600
+num_outer_steps: 1
 num_inner_steps: 16
 num_iters: 1000
-num_devices: 1
-att_type: 'att'
-agent2_reset_interval: 1
+
 
 # Evaluation — pretrained model
-run_path: ucl-dark/cg/REPLACE_WITH_RUN_ID
+run_path: lichenqi-university-of-regina/cg/REPLACE_WITH_RUN_ID
 model_path: REPLACE_WITH_MODEL_PATH
 
 # Welfare / IR reference values (from calibration during training)
@@ -83,6 +88,24 @@ ppo2:
   kernel_shape: [3, 3]
   separate: True
   hidden_size: 16
+
+es:
+  algo: OpenES
+  sigma_init: 0.04
+  sigma_decay: 0.999
+  sigma_limit: 0.01
+  init_min: 0.0
+  init_max: 0.0
+  clip_min: -1e10
+  clip_max: 1e10
+  lrate_init: 0.1
+  lrate_decay: 0.9999
+  lrate_limit: 0.001
+  beta_1: 0.99
+  beta_2: 0.999
+  eps: 1e-8
+  elite_ratio: 0.1
+  
 
 # Logging setup
 wandb:
