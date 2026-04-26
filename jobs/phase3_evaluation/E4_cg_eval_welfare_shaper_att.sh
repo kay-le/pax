@@ -29,7 +29,7 @@ if [ -z "$SLURM_JOB_ID" ]; then
             sbatch \
                 --account=def-jtyao_gpu \
                 --job-name=E4_cg_eval_s${SEED} \
-                --gpus=nvidia_h100_80gb_hbm3_1g.10gb:1 \
+                --gpus=nvidia_h100_80gb_hbm3_3g.40gb:1 \
                 --cpus-per-task=2 \
                 --mem=15G \
                 --time=0:5:00 \

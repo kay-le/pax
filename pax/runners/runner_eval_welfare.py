@@ -62,6 +62,11 @@ class WelfareEvalRunner:
         self.model_path = args.model_path
         self.ipd_stats = jax.jit(ipd_visitation)
         self.cg_stats = jax.jit(cg_visitation)
+        # Per-outer-step stats: vmap cg_visitation over the leading outer-step
+        # dim added by stacking env_state in the outer scan output.
+        # ipd_visitation uses jnp.bincount, which doesn't vmap cleanly, so we
+        # call it per-step in a Python loop at logging time.
+        self.cg_stats_per_step = jax.jit(jax.vmap(cg_visitation))
 
         # Welfare / IR constraint reference values
         self.v_ref_shaper = args.welfare.v_ref_shaper
@@ -252,7 +257,7 @@ class WelfareEvalRunner:
                 a2_mem,
                 env_state,
                 env_params,
-            ), (*trajectories, a2_metrics)
+            ), (*trajectories, a2_metrics, env_state)
 
         self.rollout = jax.jit(_outer_rollout)
 
@@ -349,7 +354,7 @@ class WelfareEvalRunner:
                 env_state,
                 env_params,
             ) = vals
-            traj_1, traj_2, a2_metrics = stack
+            traj_1, traj_2, a2_metrics, outer_env_states = stack
 
             # reset second agent memory
             a2_mem = agent2.batch_reset(a2_mem, False)
@@ -359,21 +364,89 @@ class WelfareEvalRunner:
             # → sum over inner_steps, mean over envs → [num_outer_steps, num_opps]
             traj_1_per_step = traj_1.rewards.sum(axis=1).mean(axis=2)
             traj_2_per_step = traj_2.rewards.sum(axis=1).mean(axis=2)
+
+            # ---- Per-outer-step env stats ----
+            # outer_env_states: [num_outer_steps, num_opps, num_envs, ...]
+            # Each env state's coop/counter fields are CUMULATIVE across the
+            # trial; cg_stats_per_step thus reports running probabilities up to
+            # the end of each outer episode. Coin-pickup counts (red_coop,
+            # blue_coop, red_defect, blue_defect) are already per-outer-episode
+            # in the env state — sliced below for per-episode logging.
+            per_step_env_stats = None
+            if self.args.env_id == "coin_game":
+                cg_per_step = self.cg_stats_per_step(outer_env_states)
+                # cumulative running probabilities (one entry per outer step)
+                per_step_env_stats = jax.tree_util.tree_map(
+                    lambda x: x, cg_per_step
+                )
+                # per-episode coin counts: state.red_coop[..., t] is the count
+                # of red-coop coins picked during outer episode t (mean over
+                # opps & envs). Use the FINAL stacked state (all rows hold the
+                # same per-episode totals after the trial finishes).
+                final_cg_state = jax.tree_util.tree_map(
+                    lambda x: x[-1], outer_env_states
+                )
+                per_step_env_stats["coins_per_episode/red_coop"] = (
+                    final_cg_state.red_coop.mean(axis=(0, 1))
+                )
+                per_step_env_stats["coins_per_episode/red_defect"] = (
+                    final_cg_state.red_defect.mean(axis=(0, 1))
+                )
+                per_step_env_stats["coins_per_episode/blue_coop"] = (
+                    final_cg_state.blue_coop.mean(axis=(0, 1))
+                )
+                per_step_env_stats["coins_per_episode/blue_defect"] = (
+                    final_cg_state.blue_defect.mean(axis=(0, 1))
+                )
+            ipd_per_step_obs = None
+            ipd_per_step_actions = None
+            ipd_per_step_final_obs = None
+            if (
+                self.args.env_id != "coin_game"
+                and self.args.env_type in ["meta", "sequential"]
+            ):
+                # ipd_visitation expects (obs, actions, final_obs) with leading
+                # [num_outer, num_inner, ...]. We slice per outer step inside
+                # the Python loop because jnp.bincount does not vmap cleanly.
+                # final_obs proxy: last inner-step observation of each outer
+                # episode (used only to append one trailing state).
+                ipd_per_step_obs = traj_1.observations
+                ipd_per_step_actions = traj_1.actions
+                ipd_per_step_final_obs = traj_1.observations[:, -1, ...]
+
             for step_idx in range(traj_1_per_step.shape[0]):
                 r1_step = float(traj_1_per_step[step_idx].mean())
                 r2_step = float(traj_2_per_step[step_idx].mean())
-                wandb.log(
-                    {
-                        "outer_step": step_idx,
-                        "eval/per_episode/reward/player_1": r1_step,
-                        "eval/per_episode/reward/player_2": r2_step,
-                        "eval/per_episode/welfare": r1_step + r2_step,
-                        "eval/per_episode/slack_shaper": r1_step
-                        - self.v_ref_shaper,
-                        "eval/per_episode/slack_opponent": r2_step
-                        - self.v_ref_opponent,
-                    }
-                )
+                log_payload = {
+                    "outer_step": step_idx,
+                    "eval/per_episode/reward/player_1": r1_step,
+                    "eval/per_episode/reward/player_2": r2_step,
+                    "eval/per_episode/welfare": r1_step + r2_step,
+                    "eval/per_episode/slack_shaper": r1_step
+                    - self.v_ref_shaper,
+                    "eval/per_episode/slack_opponent": r2_step
+                    - self.v_ref_opponent,
+                }
+                if per_step_env_stats is not None:
+                    step_stats = jax.tree_util.tree_map(
+                        lambda x: float(x[step_idx]), per_step_env_stats
+                    )
+                    log_payload.update(
+                        {f"eval/per_episode/{k}": v for k, v in step_stats.items()}
+                    )
+                if ipd_per_step_obs is not None:
+                    ipd_step_stats = self.ipd_stats(
+                        ipd_per_step_obs[step_idx : step_idx + 1],
+                        ipd_per_step_actions[step_idx : step_idx + 1],
+                        ipd_per_step_final_obs[step_idx],
+                    )
+                    log_payload.update(
+                        {
+                            f"eval/per_episode/{k}": float(v)
+                            for k, v in ipd_step_stats.items()
+                        }
+                    )
+                wandb.log(log_payload)
 
             # ---- Trial mean (overall, episodic) ----
             mean_r1 = float(traj_1.rewards.sum(axis=1).mean())
