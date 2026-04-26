@@ -375,10 +375,24 @@ class WelfareEvalRunner:
             per_step_env_stats = None
             if self.args.env_id == "coin_game":
                 cg_per_step = self.cg_stats_per_step(outer_env_states)
-                # cumulative running probabilities (one entry per outer step)
-                per_step_env_stats = jax.tree_util.tree_map(
-                    lambda x: x, cg_per_step
-                )
+                # Keep only coin-game-meaningful keys. cg_visitation also emits
+                # `state_visitation/*` and `cooperation_probability/*/*` with
+                # C/D labels that look like IPD metrics — drop them here.
+                cg_keep_keys = {
+                    "prob_coop/1",
+                    "prob_coop/2",
+                    "final_prob_coop/1",
+                    "final_prob_coop/2",
+                    "total_coins/1",
+                    "total_coins/2",
+                    "coins_per_episode/1",
+                    "coins_per_episode/2",
+                    "final_coin_total/1",
+                    "final_coin_total/2",
+                }
+                per_step_env_stats = {
+                    k: v for k, v in cg_per_step.items() if k in cg_keep_keys
+                }
                 # per-episode coin counts: state.red_coop[..., t] is the count
                 # of red-coop coins picked during outer episode t (mean over
                 # opps & envs). Use the FINAL stacked state (all rows hold the
@@ -448,7 +462,7 @@ class WelfareEvalRunner:
                     )
                 wandb.log(log_payload)
 
-            # ---- Trial mean (overall, episodic) ----
+            # ---- Trial mean stdout summary (no wandb logging) ----
             mean_r1 = float(traj_1.rewards.sum(axis=1).mean())
             mean_r2 = float(traj_2.rewards.sum(axis=1).mean())
             welfare = mean_r1 + mean_r2
@@ -458,29 +472,6 @@ class WelfareEvalRunner:
             self.train_episodes += 1
             if trial_idx % log_interval == 0:
                 print(f"Trial {trial_idx}/{num_episodes}")
-                if self.args.env_id == "coin_game":
-                    env_stats = jax.tree_util.tree_map(
-                        lambda x: x.item(),
-                        self.cg_stats(env_state),
-                    )
-
-                elif self.args.env_type in [
-                    "meta",
-                    "sequential",
-                ]:
-                    env_stats = jax.tree_util.tree_map(
-                        lambda x: x.item(),
-                        self.ipd_stats(
-                            traj_1.observations,
-                            traj_1.actions,
-                            obs1,
-                        ),
-                    )
-
-                else:
-                    env_stats = {}
-
-                print(f"Env Stats: {env_stats}")
                 print(
                     f"  Trial mean: R1={mean_r1:.4f}  R2={mean_r2:.4f}  "
                     f"Welfare={welfare:.4f}"
@@ -490,29 +481,6 @@ class WelfareEvalRunner:
                     f"shaper={slack_shaper:.4f}  opponent={slack_opponent:.4f}"
                 )
                 print()
-
-                if watchers:
-                    # metrics [outer_timesteps, num_opps]
-                    flattened_metrics = jax.tree_util.tree_map(
-                        lambda x: jnp.sum(jnp.mean(x, 1)), a2_metrics
-                    )
-                    agent2._logger.metrics = (
-                        agent2._logger.metrics | flattened_metrics
-                    )
-
-                    for watcher, agent in zip(watchers, agents):
-                        watcher(agent)
-                    wandb.log(
-                        {
-                            "trials": self.train_episodes,
-                            "eval/trial_mean/reward/player_1": mean_r1,
-                            "eval/trial_mean/reward/player_2": mean_r2,
-                            "eval/trial_mean/welfare": welfare,
-                            "eval/trial_mean/slack_shaper": slack_shaper,
-                            "eval/trial_mean/slack_opponent": slack_opponent,
-                        }
-                        | env_stats,
-                    )
 
         agents[0]._state = a1_state
         agents[1]._state = a2_state

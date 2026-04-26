@@ -31,7 +31,7 @@ if [ -z "$SLURM_JOB_ID" ]; then
                 --job-name=E4_cg_eval_s${SEED} \
                 --gpus=nvidia_h100_80gb_hbm3_3g.40gb:1 \
                 --cpus-per-task=2 \
-                --mem=15G \
+                --mem=5G \
                 --time=0:5:00 \
                 --output=/scratch/lichenqi/eval/output/%x-%N-%j.out \
                 "$0" "$@"
