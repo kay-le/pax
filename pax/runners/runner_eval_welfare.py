@@ -365,12 +365,12 @@ class WelfareEvalRunner:
                 wandb.log(
                     {
                         "outer_step": step_idx,
-                        "eval/per_step/reward/player_1": r1_step,
-                        "eval/per_step/reward/player_2": r2_step,
-                        "eval/per_step/welfare": r1_step + r2_step,
-                        "eval/per_step/slack_shaper": r1_step
+                        "eval/per_episode/reward/player_1": r1_step,
+                        "eval/per_episode/reward/player_2": r2_step,
+                        "eval/per_episode/welfare": r1_step + r2_step,
+                        "eval/per_episode/slack_shaper": r1_step
                         - self.v_ref_shaper,
-                        "eval/per_step/slack_opponent": r2_step
+                        "eval/per_episode/slack_opponent": r2_step
                         - self.v_ref_opponent,
                     }
                 )
