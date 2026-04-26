@@ -4,7 +4,7 @@
 # Freezes the shaper and lets the opponent learn over many episodes.
 
 # Agents  
-agent1: 'PPO_memory' # same architecture as welfareShaperAtt
+agent1: 'WelfareShaperAtt' # same architecture as welfareShaperAtt
 agent2: 'PPO_memory'
 
 # Environment
@@ -29,7 +29,7 @@ num_opps: 1
 num_outer_steps: 1000   # opponent learns over 1000 inner episodes per trial
 num_inner_steps: 16
 num_iters: 1            # one trial per job — multi-seed via launcher (100 seeds)
-
+att_type: 'att'
 
 # Evaluation — pretrained model
 # seed 6

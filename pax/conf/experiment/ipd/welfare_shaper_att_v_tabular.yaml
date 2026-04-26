@@ -35,6 +35,13 @@ num_iters: 5001
 num_devices: 1
 att_type: 'nothing'
 
+
+# evaluation (-150, -150)
+run_path: lichenqi-university-of-regina/ipd/hh2perqd
+model_path: exp/welfare-WelfareShaperAtt-vs-Tabular/run-seed-6-pop-size-1000/2026-04-23_17.00.23.973850/generation_4500
+
+
+
 # Welfare / Lagrangian config
 welfare:
   rho1: 1.0
