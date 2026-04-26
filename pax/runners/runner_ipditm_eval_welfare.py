@@ -568,19 +568,17 @@ class IPDITMEvalWelfareRunner:
                     | list_of_env_stats[i]
                 )
 
-            # ---- Trial-mean summary ----
+            # ---- Trial-mean stdout summary (no wandb logging) ----
             mean_r1 = float(rewards_1.mean())
             mean_r2 = float(rewards_2.mean())
-            wandb.log(
-                {
-                    "trials": 1,
-                    "eval/trial_mean/reward/player_1": mean_r1,
-                    "eval/trial_mean/reward/player_2": mean_r2,
-                    "eval/trial_mean/welfare": mean_r1 + mean_r2,
-                    "eval/trial_mean/slack_shaper": mean_r1 - self.v_ref_shaper,
-                    "eval/trial_mean/slack_opponent": mean_r2 - self.v_ref_opponent,
-                }
-                | jax.tree_util.tree_map(lambda x: x.item(), env_stats),
+            print(
+                f"  Trial mean: R1={mean_r1:.4f}  R2={mean_r2:.4f}  "
+                f"Welfare={mean_r1 + mean_r2:.4f}"
+            )
+            print(
+                f"  Constraint slack (trial mean): "
+                f"shaper={mean_r1 - self.v_ref_shaper:.4f}  "
+                f"opponent={mean_r2 - self.v_ref_opponent:.4f}"
             )
 
         if self.args.get("save_gif", False):
