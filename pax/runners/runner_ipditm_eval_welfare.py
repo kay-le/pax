@@ -27,7 +27,6 @@ class Sample(NamedTuple):
     behavior_values: jnp.ndarray
     dones: jnp.ndarray
     hiddens: jnp.ndarray
-    env_state: jnp.ndarray
 
 
 class MFOSSample(NamedTuple):
@@ -208,7 +207,6 @@ class IPDITMEvalWelfareRunner:
                 new_a1_mem.extras["values"],
                 done,
                 a1_mem.hidden,
-                env_state,
             )
             traj2 = Sample(
                 obs2,
@@ -218,7 +216,6 @@ class IPDITMEvalWelfareRunner:
                 new_a2_mem.extras["values"],
                 done,
                 a2_mem.hidden,
-                env_state,
             )
             return (
                 rngs,
@@ -282,7 +279,7 @@ class IPDITMEvalWelfareRunner:
                 a2_mem,
                 env_state,
                 env_params,
-            ), (*trajectories, a2_metrics)
+            ), (*trajectories, a2_metrics, env_state)
 
         def _rollout(
             _rng_run: jnp.ndarray,
@@ -348,7 +345,7 @@ class IPDITMEvalWelfareRunner:
                 env_state,
                 env_params,
             ) = vals
-            traj_1, traj_2, a2_metrics = stack
+            traj_1, traj_2, a2_metrics, outer_env_states = stack
 
             # reset memory
             a1_mem = agent1.batch_reset(a1_mem, False)
@@ -374,12 +371,12 @@ class IPDITMEvalWelfareRunner:
                         args.num_envs,
                     ),
                 )
-                rewards_1 = traj_1.rewards.mean()
-                rewards_2 = traj_2.rewards.mean()
+                rewards_1 = traj_1.rewards.sum(axis=1).mean()
+                rewards_2 = traj_2.rewards.sum(axis=1).mean()
             else:
                 env_stats = {}
-                rewards_1 = traj_1.rewards.mean()
-                rewards_2 = traj_2.rewards.mean()
+                rewards_1 = traj_1.rewards.sum(axis=1).mean()
+                rewards_2 = traj_2.rewards.sum(axis=1).mean()
 
             return (
                 env_stats,
@@ -392,6 +389,7 @@ class IPDITMEvalWelfareRunner:
                 a2_metrics,
                 traj_1,
                 traj_2,
+                outer_env_states,
             )
 
         # self.rollout = _rollout
@@ -459,6 +457,7 @@ class IPDITMEvalWelfareRunner:
             a2_metrics,
             traj,
             other_traj,
+            outer_env_states,
         ) = self.rollout(
             rng_run, a1_state, a1_mem, a2_state, a2_mem, env_params
         )
@@ -479,19 +478,20 @@ class IPDITMEvalWelfareRunner:
                 {k: v[i] for k, v in flattened_metrics_2.items()}
                 for i in range(len(list(flattened_metrics_2.values())[0]))
             ]
-            env_state = traj.env_state
+            # outer_env_states: end-of-episode state per outer step
+            # shape: [num_outer_steps, num_opps, num_envs, ...]
             list_of_env_states = [
                 EnvState(
-                    red_pos=env_state.red_pos[i, ...],
-                    blue_pos=env_state.blue_pos[i, ...],
-                    inner_t=env_state.inner_t[i, ...],
-                    outer_t=env_state.outer_t[i, ...],
-                    grid=env_state.grid[i, ...],
-                    red_inventory=env_state.red_inventory[i, ...],
-                    blue_inventory=env_state.blue_inventory[i, ...],
-                    red_coins=env_state.red_coins[i, ...],
-                    blue_coins=env_state.blue_coins[i, ...],
-                    freeze=env_state.freeze[i, ...],
+                    red_pos=outer_env_states.red_pos[i, ...],
+                    blue_pos=outer_env_states.blue_pos[i, ...],
+                    inner_t=outer_env_states.inner_t[i, ...],
+                    outer_t=outer_env_states.outer_t[i, ...],
+                    grid=outer_env_states.grid[i, ...],
+                    red_inventory=outer_env_states.red_inventory[i, ...],
+                    blue_inventory=outer_env_states.blue_inventory[i, ...],
+                    red_coins=outer_env_states.red_coins[i, ...],
+                    blue_coins=outer_env_states.blue_coins[i, ...],
+                    freeze=outer_env_states.freeze[i, ...],
                 )
                 for i in range(self.args.num_outer_steps)
             ]
@@ -504,7 +504,6 @@ class IPDITMEvalWelfareRunner:
                     actions=traj.actions[i, ...],
                     rewards=traj.rewards[i, ...],
                     dones=traj.dones[i, ...],
-                    env_state=None,
                     behavior_log_probs=traj.behavior_log_probs[i, ...],
                     behavior_values=traj.behavior_values[i, ...],
                     hiddens=traj.hiddens[i, ...],
@@ -520,7 +519,6 @@ class IPDITMEvalWelfareRunner:
                     actions=other_traj.actions[i, ...],
                     rewards=other_traj.rewards[i, ...],
                     dones=other_traj.dones[i, ...],
-                    env_state=None,
                     behavior_log_probs=other_traj.behavior_log_probs[i, ...],
                     behavior_values=other_traj.behavior_values[i, ...],
                     hiddens=other_traj.hiddens[i, ...],
@@ -552,9 +550,10 @@ class IPDITMEvalWelfareRunner:
                 agents[1]._logger.metrics["sgd_steps"] = i
                 watchers[1](agents[1])
 
-                # Per-outer-step rewards (mean over inner steps + envs)
-                r1_step = float(list_traj1[i].rewards.mean())
-                r2_step = float(list_traj2[i].rewards.mean())
+                # Per-inner-episode (per-outer-step) episodic rewards
+                # list_traj1[i].rewards: [num_inner_steps, num_opps, num_envs]
+                r1_step = float(list_traj1[i].rewards.sum(axis=0).mean())
+                r2_step = float(list_traj2[i].rewards.sum(axis=0).mean())
                 wandb.log(
                     {
                         "outer_step": i,
@@ -591,7 +590,8 @@ class IPDITMEvalWelfareRunner:
                 self.num_outer_steps,
                 self.args.fixed_coins,
             )
-            env_state = traj.env_state
+            # outer_env_states: one end-of-episode state per outer step
+            # shape: [num_outer_steps, num_opps, num_envs, ...]
             pics = []
 
             if self.num_outer_steps == 1:
@@ -599,16 +599,11 @@ class IPDITMEvalWelfareRunner:
                 pics2 = []
             now = datetime.now()
 
-            # reduce timesteps and pick a random env
-            env_state = jax.tree_util.tree_map(
-                lambda x: x.reshape((x.shape[0] * x.shape[1], *x.shape[2:])),
-                env_state,
-            )
-            env_idx = jax.random.choice(rng, env_state.red_pos.shape[2])
-            opp_idx = jax.random.choice(rng, env_state.red_pos.shape[1])
+            env_idx = jax.random.choice(rng, outer_env_states.red_pos.shape[2])
+            opp_idx = jax.random.choice(rng, outer_env_states.red_pos.shape[1])
 
             env_state = jax.tree_util.tree_map(
-                lambda x: x[:, opp_idx, env_idx, ...], env_state
+                lambda x: x[:, opp_idx, env_idx, ...], outer_env_states
             )
             env_states = [
                 EnvState(
@@ -627,7 +622,7 @@ class IPDITMEvalWelfareRunner:
             ]
             gif_every_n_eps = 10
             for i, state in enumerate(tqdm(env_states)):
-                meta_episode = i // self.args.num_inner_steps
+                meta_episode = i
                 if (meta_episode % gif_every_n_eps) == 0 or (
                     meta_episode == self.num_outer_steps - 1
                 ):

@@ -354,11 +354,11 @@ class WelfareEvalRunner:
             # reset second agent memory
             a2_mem = agent2.batch_reset(a2_mem, False)
 
-            # ---- Per-outer-step rewards (for learning curve plots) ----
+            # ---- Per-inner-episode (per-outer-step) episodic rewards ----
             # Shape: [num_outer_steps, num_inner_steps, num_opps, num_envs]
-            # → mean over inner_steps and num_envs → [num_outer_steps, num_opps]
-            traj_1_per_step = traj_1.rewards.mean(axis=(1, 3))
-            traj_2_per_step = traj_2.rewards.mean(axis=(1, 3))
+            # → sum over inner_steps, mean over envs → [num_outer_steps, num_opps]
+            traj_1_per_step = traj_1.rewards.sum(axis=1).mean(axis=2)
+            traj_2_per_step = traj_2.rewards.sum(axis=1).mean(axis=2)
             for step_idx in range(traj_1_per_step.shape[0]):
                 r1_step = float(traj_1_per_step[step_idx].mean())
                 r2_step = float(traj_2_per_step[step_idx].mean())
@@ -375,9 +375,9 @@ class WelfareEvalRunner:
                     }
                 )
 
-            # ---- Trial mean (overall) ----
-            mean_r1 = float(traj_1.rewards.mean())
-            mean_r2 = float(traj_2.rewards.mean())
+            # ---- Trial mean (overall, episodic) ----
+            mean_r1 = float(traj_1.rewards.sum(axis=1).mean())
+            mean_r2 = float(traj_2.rewards.sum(axis=1).mean())
             welfare = mean_r1 + mean_r2
             slack_shaper = mean_r1 - self.v_ref_shaper
             slack_opponent = mean_r2 - self.v_ref_opponent
