@@ -26,7 +26,7 @@ save_interval: 100
 
 #seed 3 most unstable multipliers
 # run_path: lichenqi-university-of-regina/ipditm/9txfr9et
-# model_path: /scratch/lichenqi/wandb_saved/offline-run-20260416_074421-9txfr9et/files/exp/welfare-WelfareShaperAtt-vs-PPO_memory-mean_ref/run-seed-3/2026-04-16_07.44.21.315272/generation_1000
+# model_path: exp/welfare-WelfareShaperAtt-vs-PPO_memory-mean_ref/run-seed-3/2026-04-16_07.44.21.315272/generation_1000
 # welfare:
 #   v_ref_shaper: 22.44
 #   v_ref_opponent: 21.49
@@ -34,7 +34,7 @@ save_interval: 100
 #seed 5
 
 # run_path: lichenqi-university-of-regina/ipditm/i4c7pqt8
-# model_path: /scratch/lichenqi/wandb_saved/offline-run-20260415_105700-i4c7pqt8/files/exp/welfare-WelfareShaperAtt-vs-PPO_memory-mean_ref/run-seed-5/2026-04-15_10.56.59.211241/generation_1200
+# model_path: exp/welfare-WelfareShaperAtt-vs-PPO_memory-mean_ref/run-seed-5/2026-04-15_10.56.59.211241/generation_1200
 # welfare:
 #   v_ref_shaper: 5.56
 #   v_ref_opponent: 5.56
@@ -43,7 +43,7 @@ save_interval: 100
 #seed 6 best training performance
 
 run_path: lichenqi-university-of-regina/ipditm/d9kmp9yc
-model_path: /scratch/lichenqi/wandb_saved/offline-run-20260416_003258-d9kmp9yc/files/exp/welfare-WelfareShaperAtt-vs-PPO_memory-mean_ref/run-seed-6/2026-04-16_00.32.56.105478/generation_1600
+model_path: exp/welfare-WelfareShaperAtt-vs-PPO_memory-mean_ref/run-seed-6/2026-04-16_00.32.56.105478/generation_1600
 welfare:
   v_ref_shaper: 10.0
   v_ref_opponent: 10.0
