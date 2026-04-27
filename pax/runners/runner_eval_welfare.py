@@ -394,21 +394,23 @@ class WelfareEvalRunner:
             ]
 
             # Build per-outer-step env stats list.
+            #
+            # Coin counts (red_coop/blue_coop/...) are PER EPISODE in the env.
+            # State-conditioned metrics (counter / coop1 / coop2) accumulate
+            # across the trial. We log:
+            #   - coin counts: PER episode (true per-step values)
+            #   - state_visitation, cooperation_probability: RUNNING CUMULATIVE
+            #     through outer step t — single-seed per-episode estimates
+            #     are too noisy for low-frequency states (CD ≈ 0/1 binary
+            #     when rarely visited), so we report the running fraction
+            #     which is well-defined and matches the smooth curves shown
+            #     in the paper (which also average over many samples).
             list_of_env_stats = []
             if self.args.env_id == "coin_game":
-                # cg env_state has CUMULATIVE counter / coop1 / coop2 (across
-                # the trial), and PER-EPISODE red_coop / blue_coop / red_defect
-                # / blue_defect (slot [..., t] holds counts for outer ep t).
-                # For each outer step we build a per-episode "delta" counter
-                # by subtracting the previous snapshot, then call into the
-                # same formulas cg_visitation uses.
                 cg_state_labels = [
                     "SS", "CC", "CD", "DC", "DD", "SC", "SD", "CS", "DS",
                 ]
                 eps = 1.0
-                prev_counter = jnp.zeros_like(list_of_env_states[0].counter)
-                prev_coop1 = jnp.zeros_like(list_of_env_states[0].coop1)
-                prev_coop2 = jnp.zeros_like(list_of_env_states[0].coop2)
                 for i in range(num_outer):
                     s = list_of_env_states[i]
                     # per-episode coin counts for episode i
@@ -418,17 +420,13 @@ class WelfareEvalRunner:
                     bd = s.blue_defect[..., i]
                     t1 = rc + rd
                     t2 = bc + bd
-                    # per-episode state-visit deltas
-                    counter_d = s.counter - prev_counter
-                    coop1_d = s.coop1 - prev_coop1
-                    coop2_d = s.coop2 - prev_coop2
-                    prev_counter, prev_coop1, prev_coop2 = (
-                        s.counter, s.coop1, s.coop2,
-                    )
-                    cnt = counter_d.sum(axis=(0, 1))  # [9]
-                    p1 = coop1_d.sum(axis=(0, 1)) / jnp.maximum(cnt, eps)
-                    p2 = coop2_d.sum(axis=(0, 1)) / jnp.maximum(cnt, eps)
-                    freq = cnt / jnp.maximum(cnt.sum(), eps)
+                    # cumulative-through-step-i state visits / coops
+                    cnt_cum = s.counter.sum(axis=(0, 1))  # [9]
+                    c1_cum = s.coop1.sum(axis=(0, 1))     # [9]
+                    c2_cum = s.coop2.sum(axis=(0, 1))     # [9]
+                    p1 = c1_cum / jnp.maximum(cnt_cum, eps)
+                    p2 = c2_cum / jnp.maximum(cnt_cum, eps)
+                    freq = cnt_cum / jnp.maximum(cnt_cum.sum(), eps)
                     stats_i = {
                         "coins_per_episode/1": float(t1.mean()),
                         "coins_per_episode/2": float(t2.mean()),
@@ -447,29 +445,29 @@ class WelfareEvalRunner:
                         stats_i[f"cooperation_probability/2/{lbl}"] = float(p2[j])
                     list_of_env_stats.append(stats_i)
             elif self.args.env_type in ["meta", "sequential"]:
-                # IPD-family: call ipd_visitation per outer step, separately
-                # for each player's trajectory (joint-state visitation comes
-                # from p1; cooperation probability is split /1 vs /2).
+                # IPD-family: call ipd_visitation on the trajectory PREFIX
+                # (outer steps 0..i) so state_visitation and cooperation
+                # probability are running cumulative through outer step i.
                 for i in range(num_outer):
-                    obs1_i = jax.tree_util.tree_map(
-                        lambda x: x[None, ...], list_traj1[i].observations
+                    obs1_prefix = jax.tree_util.tree_map(
+                        lambda x: x[: i + 1], traj_1.observations
                     )
-                    obs2_i = jax.tree_util.tree_map(
-                        lambda x: x[None, ...], list_traj2[i].observations
+                    obs2_prefix = jax.tree_util.tree_map(
+                        lambda x: x[: i + 1], traj_2.observations
+                    )
+                    actions1_prefix = traj_1.actions[: i + 1]
+                    actions2_prefix = traj_2.actions[: i + 1]
+                    final_obs1 = jax.tree_util.tree_map(
+                        lambda x: x[i, -1], traj_1.observations
+                    )
+                    final_obs2 = jax.tree_util.tree_map(
+                        lambda x: x[i, -1], traj_2.observations
                     )
                     p1_stats = self.ipd_stats(
-                        obs1_i,
-                        list_traj1[i].actions[None, ...],
-                        jax.tree_util.tree_map(
-                            lambda x: x[-1], list_traj1[i].observations
-                        ),
+                        obs1_prefix, actions1_prefix, final_obs1
                     )
                     p2_stats = self.ipd_stats(
-                        obs2_i,
-                        list_traj2[i].actions[None, ...],
-                        jax.tree_util.tree_map(
-                            lambda x: x[-1], list_traj2[i].observations
-                        ),
+                        obs2_prefix, actions2_prefix, final_obs2
                     )
                     stats_i = {}
                     for k, v in p1_stats.items():
