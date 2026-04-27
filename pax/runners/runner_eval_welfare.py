@@ -62,10 +62,6 @@ class WelfareEvalRunner:
         self.model_path = args.model_path
         self.ipd_stats = jax.jit(ipd_visitation)
         self.cg_stats = jax.jit(cg_visitation)
-        # Per-outer-step stats: vmap cg_visitation over the leading outer-step
-        # dim added by stacking env_state in the outer scan output.
-        # ipd_visitation uses jnp.bincount, which doesn't vmap cleanly, so we
-        # call it per-step in a Python loop at logging time.
         self.cg_stats_per_step = jax.jit(jax.vmap(cg_visitation))
 
         # Welfare / IR constraint reference values
@@ -305,7 +301,7 @@ class WelfareEvalRunner:
             [jax.random.split(rng, self.args.num_envs)] * self.args.num_opps
         ).reshape((self.args.num_opps, self.args.num_envs, -1))
 
-        # run actual loop (one iteration per trial; num_iters typically 1)
+        # run actual loop
         print("num episodes", num_episodes)
         for trial_idx in range(num_episodes):
 
@@ -358,75 +354,29 @@ class WelfareEvalRunner:
 
             # reset second agent memory
             a2_mem = agent2.batch_reset(a2_mem, False)
-
-            # ---- Per-inner-episode (per-outer-step) episodic rewards ----
-            # Shape: [num_outer_steps, num_inner_steps, num_opps, num_envs]
-            # → sum over inner_steps, mean over envs → [num_outer_steps, num_opps]
+            # per outerstep:
             traj_1_per_step = traj_1.rewards.sum(axis=1).mean(axis=2)
             traj_2_per_step = traj_2.rewards.sum(axis=1).mean(axis=2)
-
-            # ---- Per-outer-step env stats ----
-            # outer_env_states: [num_outer_steps, num_opps, num_envs, ...]
-            # Each env state's coop/counter fields are CUMULATIVE across the
-            # trial; cg_stats_per_step thus reports running probabilities up to
-            # the end of each outer episode. Coin-pickup counts (red_coop,
-            # blue_coop, red_defect, blue_defect) are already per-outer-episode
-            # in the env state — sliced below for per-episode logging.
             per_step_env_stats = None
             if self.args.env_id == "coin_game":
                 cg_per_step = self.cg_stats_per_step(outer_env_states)
-                # Keep only coin-game-meaningful keys. cg_visitation also emits
-                # `state_visitation/*` and `cooperation_probability/*/*` with
-                # C/D labels that look like IPD metrics — drop them here.
-                cg_keep_keys = {
-                    "prob_coop/1",
-                    "prob_coop/2",
-                    "final_prob_coop/1",
-                    "final_prob_coop/2",
-                    "total_coins/1",
-                    "total_coins/2",
-                    "coins_per_episode/1",
-                    "coins_per_episode/2",
-                    "final_coin_total/1",
-                    "final_coin_total/2",
-                }
                 per_step_env_stats = {
-                    k: v for k, v in cg_per_step.items() if k in cg_keep_keys
+                    k: v for k, v in cg_per_step.items()
+                    if not k.startswith("final_")
                 }
-                # per-episode coin counts: state.red_coop[..., t] is the count
-                # of red-coop coins picked during outer episode t (mean over
-                # opps & envs). Use the FINAL stacked state (all rows hold the
-                # same per-episode totals after the trial finishes).
-                final_cg_state = jax.tree_util.tree_map(
-                    lambda x: x[-1], outer_env_states
-                )
-                per_step_env_stats["coins_per_episode/red_coop"] = (
-                    final_cg_state.red_coop.mean(axis=(0, 1))
-                )
-                per_step_env_stats["coins_per_episode/red_defect"] = (
-                    final_cg_state.red_defect.mean(axis=(0, 1))
-                )
-                per_step_env_stats["coins_per_episode/blue_coop"] = (
-                    final_cg_state.blue_coop.mean(axis=(0, 1))
-                )
-                per_step_env_stats["coins_per_episode/blue_defect"] = (
-                    final_cg_state.blue_defect.mean(axis=(0, 1))
-                )
-            ipd_per_step_obs = None
-            ipd_per_step_actions = None
-            ipd_per_step_final_obs = None
+            ipd_per_step = None
             if (
                 self.args.env_id != "coin_game"
                 and self.args.env_type in ["meta", "sequential"]
             ):
-                # ipd_visitation expects (obs, actions, final_obs) with leading
-                # [num_outer, num_inner, ...]. We slice per outer step inside
-                # the Python loop because jnp.bincount does not vmap cleanly.
-                # final_obs proxy: last inner-step observation of each outer
-                # episode (used only to append one trailing state).
-                ipd_per_step_obs = traj_1.observations
-                ipd_per_step_actions = traj_1.actions
-                ipd_per_step_final_obs = traj_1.observations[:, -1, ...]
+                ipd_per_step = {
+                    "obs1": traj_1.observations,
+                    "actions1": traj_1.actions,
+                    "final_obs1": traj_1.observations[:, -1, ...],
+                    "obs2": traj_2.observations,
+                    "actions2": traj_2.actions,
+                    "final_obs2": traj_2.observations[:, -1, ...],
+                }
 
             for step_idx in range(traj_1_per_step.shape[0]):
                 r1_step = float(traj_1_per_step[step_idx].mean())
@@ -448,18 +398,32 @@ class WelfareEvalRunner:
                     log_payload.update(
                         {f"eval/per_episode/{k}": v for k, v in step_stats.items()}
                     )
-                if ipd_per_step_obs is not None:
-                    ipd_step_stats = self.ipd_stats(
-                        ipd_per_step_obs[step_idx : step_idx + 1],
-                        ipd_per_step_actions[step_idx : step_idx + 1],
-                        ipd_per_step_final_obs[step_idx],
+                if ipd_per_step is not None:
+                    ipd_p1 = self.ipd_stats(
+                        ipd_per_step["obs1"][step_idx : step_idx + 1],
+                        ipd_per_step["actions1"][step_idx : step_idx + 1],
+                        ipd_per_step["final_obs1"][step_idx],
                     )
-                    log_payload.update(
-                        {
-                            f"eval/per_episode/{k}": float(v)
-                            for k, v in ipd_step_stats.items()
-                        }
+                    ipd_p2 = self.ipd_stats(
+                        ipd_per_step["obs2"][step_idx : step_idx + 1],
+                        ipd_per_step["actions2"][step_idx : step_idx + 1],
+                        ipd_per_step["final_obs2"][step_idx],
                     )
+                    # state_visitation is joint-state — log once (from p1).
+                    for k, v in ipd_p1.items():
+                        if k.startswith("state_visitation/"):
+                            log_payload[f"eval/per_episode/{k}"] = float(v)
+                        elif k.startswith("cooperation_probability/"):
+                            suffix = k[len("cooperation_probability/"):]
+                            log_payload[
+                                f"eval/per_episode/cooperation_probability/1/{suffix}"
+                            ] = float(v)
+                    for k, v in ipd_p2.items():
+                        if k.startswith("cooperation_probability/"):
+                            suffix = k[len("cooperation_probability/"):]
+                            log_payload[
+                                f"eval/per_episode/cooperation_probability/2/{suffix}"
+                            ] = float(v)
                 wandb.log(log_payload)
 
             # ---- Trial mean stdout summary (no wandb logging) ----
