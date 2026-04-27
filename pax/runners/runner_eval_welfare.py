@@ -359,11 +359,74 @@ class WelfareEvalRunner:
             traj_2_per_step = traj_2.rewards.sum(axis=1).mean(axis=2)
             per_step_env_stats = None
             if self.args.env_id == "coin_game":
-                cg_per_step = self.cg_stats_per_step(outer_env_states)
+                # cg_visitation's outputs are CUMULATIVE when applied to a
+                # mid-trial env_state snapshot (red_coop / coop1 / counter all
+                # accumulate across the whole trial), so vmapping it over the
+                # snapshot stack produces monotone-increasing curves rather
+                # than per-episode values. Compute per-episode metrics here
+                # directly from the env state.
+                #
+                # red_coop / blue_coop / red_defect / blue_defect are already
+                # per-episode in the env state: slot [..., t] holds counts for
+                # outer episode t. Use the FINAL snapshot (all slots filled).
+                final_state = jax.tree_util.tree_map(
+                    lambda x: x[-1], outer_env_states
+                )
+                # [num_opps, num_envs, num_outer_steps]
+                red_coop_pe = final_state.red_coop
+                red_defect_pe = final_state.red_defect
+                blue_coop_pe = final_state.blue_coop
+                blue_defect_pe = final_state.blue_defect
+                total_1_pe = red_coop_pe + red_defect_pe
+                total_2_pe = blue_coop_pe + blue_defect_pe
+                eps = 1.0
                 per_step_env_stats = {
-                    k: v for k, v in cg_per_step.items()
-                    if not k.startswith("final_")
+                    "coins_per_episode/1": total_1_pe.mean(axis=(0, 1)),
+                    "coins_per_episode/2": total_2_pe.mean(axis=(0, 1)),
+                    "total_coins/1": total_1_pe.sum(axis=(0, 1)),
+                    "total_coins/2": total_2_pe.sum(axis=(0, 1)),
+                    "prob_coop/1": red_coop_pe.sum(axis=(0, 1))
+                    / jnp.maximum(total_1_pe.sum(axis=(0, 1)), eps),
+                    "prob_coop/2": blue_coop_pe.sum(axis=(0, 1))
+                    / jnp.maximum(total_2_pe.sum(axis=(0, 1)), eps),
                 }
+                # counter / coop1 / coop2 are cumulative across the trial; take
+                # snapshot-to-snapshot deltas to recover per-episode counts.
+                # Stacked shape: [num_outer_steps, num_opps, num_envs, 9]
+                counter_seq = outer_env_states.counter
+                coop1_seq = outer_env_states.coop1
+                coop2_seq = outer_env_states.coop2
+                zeros_first = jnp.zeros_like(counter_seq[:1])
+                counter_pe = jnp.diff(
+                    counter_seq, axis=0, prepend=zeros_first
+                )
+                coop1_pe = jnp.diff(coop1_seq, axis=0, prepend=zeros_first)
+                coop2_pe = jnp.diff(coop2_seq, axis=0, prepend=zeros_first)
+                # Aggregate over opps/envs → [num_outer_steps, 9]
+                counter_step = counter_pe.sum(axis=(1, 2))
+                coop1_step = coop1_pe.sum(axis=(1, 2))
+                coop2_step = coop2_pe.sum(axis=(1, 2))
+                coop1_prob = coop1_step / jnp.maximum(counter_step, eps)
+                coop2_prob = coop2_step / jnp.maximum(counter_step, eps)
+                # Normalise per-episode state counts to frequencies (sum to 1
+                # across the 9 states for each outer step).
+                state_total_step = counter_step.sum(axis=-1, keepdims=True)
+                state_freq_step = counter_step / jnp.maximum(
+                    state_total_step, eps
+                )
+                state_labels = [
+                    "SS", "CC", "CD", "DC", "DD", "SC", "SD", "CS", "DS",
+                ]
+                for i, s in enumerate(state_labels):
+                    per_step_env_stats[f"state_visitation/{s}"] = (
+                        state_freq_step[:, i]
+                    )
+                    per_step_env_stats[f"cooperation_probability/1/{s}"] = (
+                        coop1_prob[:, i]
+                    )
+                    per_step_env_stats[f"cooperation_probability/2/{s}"] = (
+                        coop2_prob[:, i]
+                    )
             ipd_per_step = None
             if (
                 self.args.env_id != "coin_game"
@@ -410,9 +473,13 @@ class WelfareEvalRunner:
                         ipd_per_step["final_obs2"][step_idx],
                     )
                     # state_visitation is joint-state — log once (from p1).
+                    # Use state_probability (frequencies) instead of raw counts.
                     for k, v in ipd_p1.items():
-                        if k.startswith("state_visitation/"):
-                            log_payload[f"eval/per_episode/{k}"] = float(v)
+                        if k.startswith("state_probability/"):
+                            suffix = k[len("state_probability/"):]
+                            log_payload[
+                                f"eval/per_episode/state_visitation/{suffix}"
+                            ] = float(v)
                         elif k.startswith("cooperation_probability/"):
                             suffix = k[len("cooperation_probability/"):]
                             log_payload[
