@@ -26,10 +26,10 @@ if [ -z "$SLURM_JOB_ID" ]; then
             sbatch \
                 --account=def-jtyao_gpu \
                 --job-name=W4sp_cg_s${SEED} \
-                --gpus-per-node=h100:4 \
+                --gpus=nvidia_h100_80gb_hbm3_3g.40gb:4 \
                 --cpus-per-task=6 \
                 --mem=20G \
-                --time=9:00:00 \
+                --time=35:00:00 \
                 --output=/scratch/lichenqi/output/%x-%N-%j.out \
                 "$0" "$@"
             ;;
@@ -83,7 +83,7 @@ export WANDB__SERVICE_WAIT=180
 export WANDB_INIT_TIMEOUT=180
 export WANDB_START_METHOD=thread
 
-EXPERIMENT="cg=welfare_shaper_att"
+EXPERIMENT="cg=welfare_unconstrained_shaper_att"
 RESUME_DIR="/scratch/lichenqi/resume/W4_sp_cg_seed${SEED}"
 HYDRA_DIR="$TMPDIR/hydra_output"
 # Hydra changes CWD to HYDRA_DIR inside Python, so save_dir ends up here:
@@ -100,7 +100,7 @@ case "$PLATFORM" in
         python -m pax.experiment +experiment/$EXPERIMENT \
             seed=$SEED \
             ++num_devices=4 \
-            ++welfare.resume_dir=$RESUME_DIR \
+            ++resume_dir=$RESUME_DIR \
             hydra.run.dir=$HYDRA_DIR
         # ──────────────────────────────────────────────────────────────────
         # Copy results to persistent storage
@@ -126,7 +126,7 @@ case "$PLATFORM" in
             ++num_inner_steps=80 \
             ++num_devices=1 \
             ++save_interval=5 \
-            ++welfare.resume_dir=$RESUME_DIR \
+            ++resume_dir=$RESUME_DIR \
             hydra.run.dir=$HYDRA_DIR
 
         # Copy checkpoint to resume_dir so second run can find it
@@ -144,7 +144,7 @@ case "$PLATFORM" in
             ++num_inner_steps=80 \
             ++num_devices=1 \
             ++save_interval=5 \
-            ++welfare.resume_dir=$RESUME_DIR \
+            ++resume_dir=$RESUME_DIR \
             hydra.run.dir=$HYDRA_DIR
         ;;
 esac

@@ -83,6 +83,7 @@ from pax.runners.experimental.runner_evo_mixed_payoffs_gen import EvoMixedPayoff
 from pax.runners.experimental.runner_evo_mixed_payoffs_only_opp import EvoMixedPayoffOnlyOppRunner
 from pax.runners.runner_evo_scanned import EvoScannedRunner
 from pax.runners.runner_welfare_evo import WelfareEvoRunner
+from pax.runners.runner_welfare_unconstrained_evo import WelfareUnconstrainedEvoRunner
 from pax.runners.runner_welfare_marl import WelfareRLRunner
 from pax.runners.runner_eval_welfare import WelfareEvalRunner
 
@@ -373,7 +374,7 @@ def runner_setup(args, env, agents, save_dir, logger):
         return WelfareEvalRunner(agents, env, args)
 
     if args.runner in ["evo", "evo_mixed_lr", "evo_hardstop", "evo_mixed_payoff", "evo_mixed_ipd_payoff",
-    "evo_mixed_payoff_gen", "evo_mixed_payoff_input", "evo_scanned", "evo_mixed_payoff_only_opp", "multishaper_evo", "evo_nroles", "welfare_evo"]:
+    "evo_mixed_payoff_gen", "evo_mixed_payoff_input", "evo_scanned", "evo_mixed_payoff_only_opp", "multishaper_evo", "evo_nroles", "welfare_evo", "welfare_unconstrained_evo"]:
         agent1 = agents[0]
         algo = args.es.algo
         strategies = {"CMA_ES", "OpenES", "PGPE", "SimpleGA"}
@@ -527,6 +528,18 @@ def runner_setup(args, env, agents, save_dir, logger):
         elif args.runner == "welfare_evo":
             logger.info("Training with Welfare EVO runner (Lagrangian IR)")
             return WelfareEvoRunner(
+                agents,
+                env,
+                strategy,
+                es_params,
+                param_reshaper,
+                save_dir,
+                args,
+            )
+
+        elif args.runner == "welfare_unconstrained_evo":
+            logger.info("Training with Welfare Unconstrained EVO runner (no IR constraints)")
+            return WelfareUnconstrainedEvoRunner(
                 agents,
                 env,
                 strategy,
@@ -988,7 +1001,7 @@ def main(args):
     print(f"Number of Training Iterations: {args.num_iters}")
 
     if args.runner in ["evo", "evo_mixed_lr", "evo_hardstop", "evo_mixed_payoff", "evo_mixed_ipd_payoff",
-    "evo_mixed_payoff_gen", "evo_mixed_payoff_input", "evo_scanned", "evo_mixed_payoff_only_opp", "multishaper_evo", "evo_nroles", "welfare_evo"]:
+    "evo_mixed_payoff_gen", "evo_mixed_payoff_input", "evo_scanned", "evo_mixed_payoff_only_opp", "multishaper_evo", "evo_nroles", "welfare_evo", "welfare_unconstrained_evo"]:
         print(f"Running {args.runner}")
 
         runner.run_loop(env_params, agent_pair, args.num_iters, watchers)
