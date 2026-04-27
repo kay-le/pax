@@ -32,7 +32,7 @@ if [ -z "$SLURM_JOB_ID" ]; then
                 --gpus=nvidia_h100_80gb_hbm3_1g.10gb:1 \
                 --cpus-per-task=2 \
                 --mem=4G \
-                --time=0:05:00 \
+                --time=3:00:00 \
                 --output=/scratch/lichenqi/eval/output/%x-%N-%j.out \
                 "$0" "$@"
             ;;
@@ -91,6 +91,7 @@ export WANDB_START_METHOD=thread
 
 EXPERIMENT="ipd=eval_welfare_shaper_att_v_tabular"
 HYDRA_DIR="$TMPDIR/hydra_output"
+NUM_SEEDS=20
 
 start_time=$(date +%s)
 echo "=== Platform: $PLATFORM | Seed: $SEED | $(date '+%Y-%m-%d %H:%M:%S') ==="
@@ -99,14 +100,28 @@ cd /project/def-jtyao/lichenqi/pax
 
 case "$PLATFORM" in
     fir|tri)
-        python -m pax.experiment +experiment/$EXPERIMENT \
-            seed=$SEED \
-            hydra.run.dir=$HYDRA_DIR
+        for ((offset=0; offset<NUM_SEEDS; offset++)); do
+            run_seed=$((SEED + offset))
+            run_start_time=$(date +%s)
+            echo "=== Run $((offset + 1))/$NUM_SEEDS | seed=$run_seed | $(date '+%Y-%m-%d %H:%M:%S') ==="
 
-       
+            python -m pax.experiment +experiment/$EXPERIMENT \
+                ++group="eval_welfare_shaper_att" \
+                seed=$run_seed \
+                hydra.run.dir="$HYDRA_DIR/seed_${run_seed}"
+
+            run_status=$?
+            run_end_time=$(date +%s)
+            if [ $run_status -ne 0 ]; then
+                echo "=== Failed: $PLATFORM seed=$run_seed | Elapsed: $((run_end_time - run_start_time))s ==="
+                exit $run_status
+            fi
+
+            echo "=== Completed: $PLATFORM seed=$run_seed | Elapsed: $((run_end_time - run_start_time))s ==="
+        done
 
         end_time=$(date +%s)
-        echo "=== Done: $PLATFORM seed=$SEED | Elapsed: $((end_time - start_time))s ==="
+        echo "=== Done: $PLATFORM seeds=${SEED}-$((SEED + NUM_SEEDS - 1)) | Elapsed: $((end_time - start_time))s ==="
         ;;
     tri-debug| fir-debug)
         echo "=== Debug eval run (small num_iters) ==="
