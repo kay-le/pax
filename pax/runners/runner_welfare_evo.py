@@ -188,7 +188,6 @@ class WelfareEvoRunner:
         # JIT evo operators
         strategy.ask = jax.jit(strategy.ask)
         strategy.tell = jax.jit(strategy.tell)
-        param_reshaper.reshape = jax.jit(param_reshaper.reshape)
 
         # ------------------------------------------------------------------
         # Inner / outer rollout  (same as EvoRunner)
@@ -439,11 +438,13 @@ class WelfareEvoRunner:
         for ep in range(num_episodes):
             rng, rng_run, rng_evo = jax.random.split(rng, 3)
             x, evo_state = strategy.ask(rng_evo, evo_state, es_params)
-            params = param_reshaper.reshape(x)
-            if self.args.num_devices == 1:
-                params = jax.tree_util.tree_map(
-                    lambda x: jax.lax.expand_dims(x, (0,)), params
-                )
+            params = jax.vmap(param_reshaper.reshape_single)(x)
+            params = jax.tree_util.tree_map(
+                lambda p: p.reshape(
+                    (self.args.num_devices, self.popsize) + p.shape[1:]
+                ),
+                params,
+            )
 
             (
                 welfare, r1_per_member, r2_per_member,
@@ -566,11 +567,13 @@ class WelfareEvoRunner:
 
             # Ask ES for candidate parameters
             x, evo_state = strategy.ask(rng_evo, evo_state, es_params)
-            params = param_reshaper.reshape(x)
-            if self.args.num_devices == 1:
-                params = jax.tree_util.tree_map(
-                    lambda x: jax.lax.expand_dims(x, (0,)), params
-                )
+            params = jax.vmap(param_reshaper.reshape_single)(x)
+            params = jax.tree_util.tree_map(
+                lambda p: p.reshape(
+                    (self.args.num_devices, self.popsize) + p.shape[1:]
+                ),
+                params,
+            )
 
             # Rollout
             (
@@ -657,20 +660,10 @@ class WelfareEvoRunner:
             # Saving
             if gen % self.args.save_interval == 0:
                 log_savepath = os.path.join(self.save_dir, f"generation_{gen}")
-                if self.args.num_devices > 1:
-                    top_params = param_reshaper.reshape(
-                        log["top_gen_params"][0 : self.args.num_devices]
-                    )
-                    top_params = jax.tree_util.tree_map(
-                        lambda x: x[0].reshape(x[0].shape[1:]), top_params
-                    )
-                else:
-                    top_params = param_reshaper.reshape(
-                        log["top_gen_params"][0:1]
-                    )
-                    top_params = jax.tree_util.tree_map(
-                        lambda x: x.reshape(x.shape[1:]), top_params
-                    )
+                top_params = jax.vmap(param_reshaper.reshape_single)(
+                    log["top_gen_params"][0:1]
+                )
+                top_params = jax.tree_util.tree_map(lambda p: p[0], top_params)
                 save(top_params, log_savepath)
                 if watchers:
                     print(f"Saving generation {gen} locally and to WandB")

@@ -979,6 +979,14 @@ def watcher_setup(args, logger):
 def main(args):
     print(f"Jax backend: {jax.extend.backend.get_backend().platform}")
 
+    actual_devices = jax.local_device_count()
+    requested = getattr(args, "num_devices", 1)
+    if requested > 1 and actual_devices != requested:
+        raise RuntimeError(
+            f"num_devices={requested} but JAX sees {actual_devices} GPUs on this node. "
+            f"Check your SLURM --gpus request or use ++num_devices={actual_devices}."
+        )
+
     """Set up main."""
     logger = logging.getLogger()
     with Section("Global setup", logger=logger):
