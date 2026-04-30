@@ -29,7 +29,7 @@ if [ -z "$SLURM_JOB_ID" ]; then
                 --gpus=nvidia_h100_80gb_hbm3_2g.20gb:4 \
                 --cpus-per-task=6 \
                 --mem=20G \
-                --time=18:20:00 \
+                --time=48:20:00 \
                 --output=/scratch/lichenqi/output/%x-%N-%j.out \
                 "$0" "$@"
             ;;

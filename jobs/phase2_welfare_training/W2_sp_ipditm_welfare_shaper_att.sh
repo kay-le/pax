@@ -18,7 +18,7 @@ PLATFORM=${1:-tri}
 SEED=${2:-0}
 
 # ──────────────────────────────────────────────────────────────────
-# Auto-submit: if not already running under SLURM, sbatch ourselves
+# h100:4 for 400gen,9:30h;600gen,14h;
 # ──────────────────────────────────────────────────────────────────
 if [ -z "$SLURM_JOB_ID" ]; then
     case "$PLATFORM" in
@@ -26,10 +26,12 @@ if [ -z "$SLURM_JOB_ID" ]; then
             sbatch \
                 --account=def-jtyao_gpu \
                 --job-name=W2sp_ipditm_s${SEED} \
+                --nodes=1 \
+                --ntasks=1 \
                 --gpus-per-node=h100:4 \
                 --cpus-per-task=6 \
-                --mem=20G \
-                --time=9:20:00 \
+                --mem=30G \
+                --time=9:30:00 \
                 --output=/scratch/lichenqi/output/%x-%N-%j.out \
                 "$0" "$@"
             ;;
@@ -94,7 +96,6 @@ start_time=$(date +%s)
 echo "=== Platform: $PLATFORM | Seed: $SEED | $(date '+%Y-%m-%d %H:%M:%S') ==="
 
 cd /project/def-jtyao/lichenqi/pax
-
 case "$PLATFORM" in
     fir|tri)
         python -m pax.experiment +experiment/$EXPERIMENT \
