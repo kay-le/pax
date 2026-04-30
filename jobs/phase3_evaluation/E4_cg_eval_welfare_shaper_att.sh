@@ -1,22 +1,3 @@
-#!/bin/bash
-# Unified launcher for E4 CoinGame welfare shaper att vs PPO_memory (evaluation)
-#
-# Usage:
-#   bash E4_cg_eval_welfare_shaper_att.sh <platform> <seed>
-#
-# Platforms:
-#   fir        — Fir cluster, 2g.20gb partial H100, 24h wall time
-#   tri        — Trillium cluster, 2g.20gb partial H100, 24h wall time
-#   tri-debug  — Trillium, 2g.20gb partial H100, 1h, smaller num_iters
-#
-# IMPORTANT: Update model_path and run_path in the eval yaml before running:
-#   pax/conf/experiment/cg/eval_welfare_shaper_att.yaml
-#
-# Examples:
-#   bash E4_cg_eval_welfare_shaper_att.sh fir 0
-#   bash E4_cg_eval_welfare_shaper_att.sh tri 0
-#   bash E4_cg_eval_welfare_shaper_att.sh tri-debug 0
-
 PLATFORM=${1:-tri}
 SEED=${2:-0}
 
@@ -29,10 +10,10 @@ if [ -z "$SLURM_JOB_ID" ]; then
             sbatch \
                 --account=def-jtyao_gpu \
                 --job-name=E4_cg_eval_s${SEED} \
-                --gpus=nvidia_h100_80gb_hbm3_3g.40gb:1 \
+                --gpus=nvidia_h100_80gb_hbm3_2g.20gb:1 \
                 --cpus-per-task=2 \
                 --mem=5G \
-                --time=3:00:00 \
+                --time=0:05:00 \
                 --output=/scratch/lichenqi/eval/output/%x-%N-%j.out \
                 "$0" "$@"
             ;;
@@ -89,9 +70,12 @@ export WANDB__SERVICE_WAIT=180
 export WANDB_INIT_TIMEOUT=180
 export WANDB_START_METHOD=thread
 
-EXPERIMENT="cg=eval_welfare_shaper_att"
+# "cg=eval_welfare_shaper_att"
+# "cg=eval_mfos_es_v_ppo_mem"
+# "cg=eval_shaper_v_ppo_mem"
+EXPERIMENT="eval_shaper_v_ppo_mem"
 HYDRA_DIR="$TMPDIR/hydra_output"
-NUM_SEEDS=100
+NUM_SEEDS=1
 
 start_time=$(date +%s)
 echo "=== Platform: $PLATFORM | Seed: $SEED | $(date '+%Y-%m-%d %H:%M:%S') ==="
@@ -106,7 +90,6 @@ case "$PLATFORM" in
             echo "=== Run $((offset + 1))/$NUM_SEEDS | seed=$run_seed | $(date '+%Y-%m-%d %H:%M:%S') ==="
 
             python -m pax.experiment +experiment/$EXPERIMENT \
-                ++group="eval_welfare_shaper_att" \
                 seed=$run_seed \
                 hydra.run.dir="$HYDRA_DIR/seed_${run_seed}"
 

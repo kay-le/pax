@@ -650,7 +650,7 @@ class EvoRunner:
                     "train/time/seconds": float(
                         (time.time() - self.start_time)
                     ),
-                    "train/reward_per_timestep/player_1": r1_mean,
+                    "train/reward_per_timestep/player_1": r1_mean, #mislabeled, it is actually per episode reward
                     "train/reward_per_timestep/player_2": r2_mean,
                     "train/reward_per_episode/player_1": r1_per_episode,
                     "train/reward_per_episode/player_2": r2_per_episode,
