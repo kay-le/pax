@@ -28,10 +28,10 @@ if [ -z "$SLURM_JOB_ID" ]; then
                 --job-name=W2sp_ipditm_s${SEED} \
                 --nodes=1 \
                 --ntasks=1 \
-                --gpus=nvidia_h100_80gb_hbm3_2g.20gb:3 \
+                --gpus-per-node=h100:4 \
                 --cpus-per-task=6 \
                 --mem=30G \
-                --time=0:20:00 \
+                --time=37:00:00 \
                 --output=/scratch/lichenqi/output/%x-%N-%j.out \
                 "$0" "$@"
             ;;
@@ -100,7 +100,7 @@ case "$PLATFORM" in
     fir|tri)
         python -m pax.experiment +experiment/$EXPERIMENT \
             seed=$SEED \
-            ++num_devices=3 \
+            ++num_devices=4 \
             ++resume_dir=$RESUME_DIR \
             hydra.run.dir=$HYDRA_DIR
         # ──────────────────────────────────────────────────────────────────
