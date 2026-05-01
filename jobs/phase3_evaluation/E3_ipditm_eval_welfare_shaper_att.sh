@@ -91,7 +91,7 @@ export WANDB_START_METHOD=thread
 
 EXPERIMENT="ipditm=eval_welfare_shaper_att"
 HYDRA_DIR="$TMPDIR/hydra_output"
-NUM_SEEDS=1
+NUM_SEEDS=100
 
 start_time=$(date +%s)
 echo "=== Platform: $PLATFORM | Seed: $SEED | $(date '+%Y-%m-%d %H:%M:%S') ==="

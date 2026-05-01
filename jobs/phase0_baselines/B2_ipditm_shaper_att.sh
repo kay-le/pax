@@ -29,7 +29,7 @@ if [ -z "$SLURM_JOB_ID" ]; then
                 --gpus-per-node=h100:4 \
                 --cpus-per-task=6 \
                 --mem=20G \
-                --time=23:50:00 \
+                --time=27:50:00 \
                 --output=/scratch/lichenqi/output/%x-%N-%j.out \
                 "$0" "$@"
             ;;
@@ -100,13 +100,14 @@ case "$PLATFORM" in
         python -m pax.experiment +experiment/$EXPERIMENT \
             seed=$SEED \
             ++num_devices=4 \
-            ++welfare.resume_dir=$RESUME_DIR \
+            ++resume_dir=$RESUME_DIR \
             hydra.run.dir=$HYDRA_DIR
+
         # ──────────────────────────────────────────────────────────────────
         # Copy results to persistent storage
         # ──────────────────────────────────────────────────────────────────
         echo "Copying final results to $RESUME_DIR ..."
-        cp -rL "$EXP_OUTPUT"/welfare-*/ "$RESUME_DIR/" 2>/dev/null
+        cp -rL "$EXP_OUTPUT"/baseline-*/ "$RESUME_DIR/" 2>/dev/null
         mkdir -p /scratch/lichenqi/wandb_saved
         cp -rL "$WANDB_DIR"/wandb/offline-run-* /scratch/lichenqi/wandb_saved/ 2>/dev/null || true
 
@@ -126,12 +127,12 @@ end_time=$(date +%s)
             ++num_inner_steps=80 \
             ++num_devices=1 \
             ++save_interval=5 \
-            ++welfare.resume_dir=$RESUME_DIR \
+            ++resume_dir=$RESUME_DIR \
             hydra.run.dir=$HYDRA_DIR
 
         # Copy checkpoint to resume_dir so second run can find it
         echo "Copying checkpoints from $EXP_OUTPUT to $RESUME_DIR ..."
-        cp -rL "$EXP_OUTPUT"/welfare-*/ "$RESUME_DIR/debug" 2>/dev/null
+        cp -rL "$EXP_OUTPUT"/baseline-*/ "$RESUME_DIR/debug" 2>/dev/null
         echo "Resume dir contents:"
         find "$RESUME_DIR" -name "generation_*" | sort
 
@@ -144,7 +145,7 @@ end_time=$(date +%s)
             ++num_inner_steps=80 \
             ++num_devices=1 \
             ++save_interval=5 \
-            ++welfare.resume_dir=$RESUME_DIR \
+            ++resume_dir=$RESUME_DIR \
             hydra.run.dir=$HYDRA_DIR
         ;;
 esac
