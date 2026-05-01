@@ -28,25 +28,33 @@ att_type: avg            # one trial per job - multi-seed via launcher
 
 
 # Seed 3: most unstable multipliers
-# run_path: lichenqi-university-of-regina/ipditm/9txfr9et
-# model_path: exp/welfare-WelfareShaperAtt-vs-PPO_memory-mean_ref/run-seed-3/2026-04-16_07.44.21.315272/generation_1000
-# welfare:
-#   v_ref_shaper: 22.44
-#   v_ref_opponent: 21.49
-
+run_path: lichenqi-university-of-regina/ipditm/9txfr9et
+model_path: exp/welfare-WelfareShaperAtt-vs-PPO_memory-mean_ref/run-seed-3/2026-04-30_07.49.34.445646/generation_1600
+welfare:
+  v_ref_shaper: 22.44
+  v_ref_opponent: 21.49
 # Seed 5
 # run_path: lichenqi-university-of-regina/ipditm/i4c7pqt8
-# model_path: exp/welfare-WelfareShaperAtt-vs-PPO_memory-mean_ref/run-seed-5/2026-04-15_10.56.59.211241/generation_1200
+# model_path: exp/welfare-WelfareShaperAtt-vs-PPO_memory-mean_ref/run-seed-5/2026-04-30_14.38.52.924867/generation_1600
 # welfare:
 #   v_ref_shaper: 5.56
 #   v_ref_opponent: 5.56
 
 # Seed 6: best training performance
-run_path: lichenqi-university-of-regina/ipditm/d9kmp9yc
-model_path: exp/welfare-WelfareShaperAtt-vs-PPO_memory-mean_ref/run-seed-6/2026-04-16_00.32.56.105478/generation_1600
-welfare:
-  v_ref_shaper: 10.0
-  v_ref_opponent: 10.0
+# run_path: lichenqi-university-of-regina/ipditm/d9kmp9yc
+# model_path: exp/welfare-WelfareShaperAtt-vs-PPO_memory-mean_ref/run-seed-6/2026-04-16_00.32.56.105478/generation_1600
+# welfare:
+#   v_ref_shaper: 10.0
+#   v_ref_opponent: 10.0
+
+
+#seed:9 unconstrained
+# run_path: lichenqi-university-of-regina/ipditm/xy2k5xr4
+# model_path: exp/welfare-WelfareShaperAtt-vs-PPO_memory-mean_ref/run-seed-9/2026-04-30_11.22.59.403047/generation_1600
+# welfare: #no meaningful, just to let the eval runner pass the sanity check
+#   v_ref_shaper: 0.0
+#   v_ref_opponent: 0.0
+
 
 # PPO agent parameters (for WelfareShaperAtt = agent1)
 ppo1:
@@ -100,7 +108,7 @@ ppo2:
 wandb:
   entity: "lichenqi-university-of-regina"
   project: ipditm
-  group: 'eval-welfare-${agent1}-vs-${agent2}'
+  group: 'eval-welfare-${agent1}-vs-${agent2}-${welfare.v_ref_shaper}'
   name: eval-seed-${seed}
   log: True
   mode: online

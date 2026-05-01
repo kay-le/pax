@@ -1,3 +1,4 @@
+#!/bin/bash
 PLATFORM=${1:-tri}
 SEED=${2:-0}
 
@@ -73,9 +74,9 @@ export WANDB_START_METHOD=thread
 # "cg=eval_welfare_shaper_att"
 # "cg=eval_mfos_es_v_ppo_mem"
 # "cg=eval_shaper_v_ppo_mem"
-EXPERIMENT="eval_shaper_v_ppo_mem"
+EXPERIMENT="cg=eval_shaper_v_ppo_mem"
 HYDRA_DIR="$TMPDIR/hydra_output"
-NUM_SEEDS=1
+NUM_SEEDS=100
 
 start_time=$(date +%s)
 echo "=== Platform: $PLATFORM | Seed: $SEED | $(date '+%Y-%m-%d %H:%M:%S') ==="
