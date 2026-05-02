@@ -25,7 +25,7 @@ if [ -z "$SLURM_JOB_ID" ]; then
         fir)
             sbatch \
                 --account=def-jtyao_gpu \
-                --job-name=W2sp_ipditm_s${SEED} \
+                --job-name=B5_ipditm_s${SEED} \
                 --gpus-per-node=h100:4 \
                 --cpus-per-task=6 \
                 --mem=20G \

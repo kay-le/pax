@@ -111,7 +111,7 @@ es:
   clip_max: 1e10
   lrate_init: 0.01
   lrate_decay: 0.9999
-  lrate_limit: 0.01 #chaned from 0.001 to 0.01 
+  lrate_limit: 0.01 #changed from 0.001 to 0.01 
   beta_1: 0.99
   beta_2: 0.999
   eps: 1e-8
