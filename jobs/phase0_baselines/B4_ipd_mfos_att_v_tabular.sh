@@ -31,7 +31,7 @@ if [ -z "$SLURM_JOB_ID" ]; then
                 --gpus-per-node=nvidia_h100_80gb_hbm3_1g.10gb:2 \
                 --cpus-per-task=6 \
                 --mem=16G \
-                --time=02:00:00 \
+                --time=10:00:00 \
                 --output=/scratch/lichenqi/output/%x-%N-%j.out \
                 "$0" "$@"
             ;;
