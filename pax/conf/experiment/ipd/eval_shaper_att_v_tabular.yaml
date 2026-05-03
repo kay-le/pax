@@ -31,7 +31,7 @@ att_type: 'nothing'
 
 
 # Evaluation 
-run_path: lichenqi-university-of-regina/ipd/djoz6r95
+run_path: lichenqi-university-of-regina/ipd/clp55eeg
 model_path: exp/baseline-Shaper-vs-Tabular/run-seed-10/2026-05-02_09.24.17.983322/generation_5000
 welfare:
   v_ref_shaper: 0.0
