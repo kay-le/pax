@@ -89,9 +89,12 @@ export WANDB__SERVICE_WAIT=180
 export WANDB_INIT_TIMEOUT=180
 export WANDB_START_METHOD=thread
 
-EXPERIMENT="ipd=eval_welfare_shaper_att_v_tabular"
+# "ipd=eval_welfare_shaper_att_v_tabular"
+# "ipd=eval_mfos_att_v_tabular"
+# "ipd=eval_shaper_att_v_tabular"
+EXPERIMENT="ipd=eval_mfos_att_v_tabular"
 HYDRA_DIR="$TMPDIR/hydra_output"
-NUM_SEEDS=20
+NUM_SEEDS=1 #20
 
 start_time=$(date +%s)
 echo "=== Platform: $PLATFORM | Seed: $SEED | $(date '+%Y-%m-%d %H:%M:%S') ==="
