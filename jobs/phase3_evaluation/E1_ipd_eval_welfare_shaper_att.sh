@@ -94,7 +94,7 @@ export WANDB_START_METHOD=thread
 # "ipd=eval_shaper_att_v_tabular"
 EXPERIMENT="ipd=eval_mfos_att_v_tabular"
 HYDRA_DIR="$TMPDIR/hydra_output"
-NUM_SEEDS=1 #20
+NUM_SEEDS=20 #20
 
 start_time=$(date +%s)
 echo "=== Platform: $PLATFORM | Seed: $SEED | $(date '+%Y-%m-%d %H:%M:%S') ==="
@@ -109,7 +109,6 @@ case "$PLATFORM" in
             echo "=== Run $((offset + 1))/$NUM_SEEDS | seed=$run_seed | $(date '+%Y-%m-%d %H:%M:%S') ==="
 
             python -m pax.experiment +experiment/$EXPERIMENT \
-                ++group="eval_welfare_shaper_att" \
                 seed=$run_seed \
                 hydra.run.dir="$HYDRA_DIR/seed_${run_seed}"
 

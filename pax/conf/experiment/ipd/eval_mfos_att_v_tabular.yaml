@@ -29,8 +29,8 @@ att_type: 'avg'
 
 
 # Evaluation — pretrained model
-run_path: lichenqi-university-of-regina/ipd/hh2perqd
-model_path: exp/welfare-WelfareShaperAtt-vs-Tabular/run-seed-6-pop-size-1000/2026-04-23_17.00.23.973850/generation_4500
+run_path: lichenqi-university-of-regina/ipd/ogpsx6os
+model_path: exp/baseline-MFOS-vs-Tabular/run-seed-8/2026-05-02_09.20.10.331190/generation_5000
 
 welfare:
   v_ref_shaper: 0.0
@@ -106,7 +106,7 @@ es:
 wandb:
   entity: "lichenqi-university-of-regina"
   project: ipd
-  group: 'baseline-${agent1}-vs-${agent2}'
+  group: 'eval-baseline-${agent1}-vs-${agent2}'
   name: run-seed-${seed}
   log: True
 
