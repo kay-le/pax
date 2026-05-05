@@ -8,20 +8,21 @@ agent2: 'PPO_memory'
 env_id: InTheMatrix
 env_type: meta
 env_discount: 0.96
-payoff: [[[3, 0], [5, 1]], [[3, 5], [0, 1]]]
-runner: ipditm_eval
 freeze: 5
+payoff: [[[3, 0], [5, 1]], [[3, 5], [0, 1]]]
 fixed_coins: True
 
-# Training hyperparameters
-
-# env_batch_size = num_envs * num_opponents
+#save
+save: True
+save_interval: 100
+runner: ipditm_eval
 num_envs: 50
 num_opps: 1
 num_outer_steps: 100
-num_inner_steps: 152 
-save_interval: 100 
+num_inner_steps: 152
+num_iters: 1            # one trial per job; overridden for shaper to num_outer_steps
 
+att_type: avg
 # Evaluation
 model_path1: exp/baseline-shaping-Shaper-vs-PPO_memory/run-seed-7/2026-05-04_01.14.41.337020/generation_1600
 run_path: lichenqi-university-of-regina/ipditm/p5pgn14f
