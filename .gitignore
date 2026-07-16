@@ -103,6 +103,7 @@ wandb/
 exp/
 wandb_exports/
 wandb_analysis.py
+wandb_cache/
 
 # Hydra
 .hydra

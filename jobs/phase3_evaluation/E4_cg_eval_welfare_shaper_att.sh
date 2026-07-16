@@ -74,7 +74,7 @@ export WANDB_START_METHOD=thread
 # "cg=eval_welfare_shaper_att"
 # "cg=eval_mfos_es_v_ppo_mem"
 # "cg=eval_shaper_v_ppo_mem"
-EXPERIMENT="cg=eval_shaper_v_ppo_mem"
+EXPERIMENT="cg=eval_welfare_shaper_att"
 HYDRA_DIR="$TMPDIR/hydra_output"
 NUM_SEEDS=100
 
