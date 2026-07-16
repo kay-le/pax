@@ -23,8 +23,8 @@ num_envs: 50
 num_opps: 1
 num_outer_steps: 1
 num_inner_steps: 16
-num_iters: 500
-save_interval: 500
+num_iters: 1000
+save_interval: 1000
 
 # PPO agent parameters
 ppo1:
