@@ -32,7 +32,7 @@ if [ -z "$SLURM_JOB_ID" ]; then
                 --gpus-per-node=nvidia_h100_80gb_hbm3_1g.10gb:1 \
                 --cpus-per-task=4 \
                 --mem=8G \
-                --time=06:00:00 \
+                --time=00:10:00 \
                 --output=/scratch/lichenqi/output/%x-%N-%j.out \
                 "$0" "$@"
             ;;
@@ -42,7 +42,7 @@ if [ -z "$SLURM_JOB_ID" ]; then
                 --job-name=R3_ipditm_s${SEED} \
                 --gpus-per-node=h100:1 \
                 --cpus-per-task=4 \
-                --time=06:00:00 \
+                --time=00:10:00 \
                 --output=/scratch/lichenqi/output/%x-%N-%j.out \
                 "$0" "$@"
             ;;
