@@ -23,7 +23,7 @@ num_envs: 50
 num_opps: 1
 num_outer_steps: 1
 num_inner_steps: 16
-num_iters: 1000
+num_iters: 3000
 save_interval: 1000
 
 # PPO agent parameters
@@ -80,4 +80,4 @@ wandb:
   group: 'independentLearning-rl-${agent1}-vs-${agent2}'
   name: run-seed-${seed}
   log: True
-  mode: offline
+  mode: online
