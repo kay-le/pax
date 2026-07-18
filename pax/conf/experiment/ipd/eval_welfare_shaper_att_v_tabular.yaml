@@ -27,12 +27,50 @@ att_type: 'nothing'
 
 
 # Evaluation — pretrained model
-run_path: lichenqi-university-of-regina/ipd/hh2perqd
-model_path: exp/welfare-WelfareShaperAtt-vs-Tabular/run-seed-6-pop-size-1000/2026-04-23_17.00.23.973850/generation_4500
+# seed 6
+# run_path: lichenqi-university-of-regina/ipd/hh2perqd
+# model_path: exp/welfare-WelfareShaperAtt-vs-Tabular/run-seed-6-pop-size-1000/2026-04-23_17.00.23.973850/generation_4500
+# welfare:
+#   v_ref_shaper: -150.0
+#   v_ref_opponent: -150.0
 
+
+# seed 61
+# run_path: lichenqi-university-of-regina/ipd/4fgfiv9a
+# model_path: exp/welfare-WelfareShaperAtt-vs-Tabular/run-seed-61-pop-size-1000/2026-07-17_18.23.06.504360/generation_5000
+# welfare:
+#   v_ref_shaper: -150.0
+#   v_ref_opponent: -150.0
+
+# seed 63
+# run_path: lichenqi-university-of-regina/ipd/gwmf7wuc
+# model_path: exp/welfare-WelfareShaperAtt-vs-Tabular/run-seed-63-pop-size-1000/2026-07-17_18.27.10.121913/generation_5000
+# welfare:
+#   v_ref_shaper: -150.0
+#   v_ref_opponent: -150.0
+
+# for unconstrianed
+# seed 7
+# run_path: lichenqi-university-of-regina/ipd/3mpssnjy
+# model_path: exp/welfare-unconstrained-WelfareShaperAtt-vs-Tabular/run-seed-7/2026-07-17_18.37.35.737352/generation_5000
+# welfare:
+#   v_ref_shaper: 0.0
+#   v_ref_opponent: 0.0
+
+# seed 73
+
+run_path: lichenqi-university-of-regina/ipd/ss4xd2bm
+model_path: exp/welfare-unconstrained-WelfareShaperAtt-vs-Tabular/run-seed-73/2026-07-17_18.38.37.267185/generation_5000
 welfare:
-  v_ref_shaper: -150.0
-  v_ref_opponent: -150.0
+  v_ref_shaper: 0.0
+  v_ref_opponent: 0.0
+
+# seed 77
+# run_path: lichenqi-university-of-regina/ipd/0zd9tzxm
+# model_path: exp/welfare-unconstrained-WelfareShaperAtt-vs-Tabular/run-seed-77/2026-07-17_18.37.35.760041/generation_5000
+# welfare:
+#   v_ref_shaper: 0.0
+#   v_ref_opponent: 0.0
 
 
 
@@ -90,7 +128,7 @@ es:
   clip_max: 1e10
   lrate_init: 0.01
   lrate_decay: 0.9999
-  lrate_limit: 0.01 #chaned from 0.001 to 0.01 
+  lrate_limit: 0.01 #chaned from 0.001 to 0.01
   beta_1: 0.99
   beta_2: 0.999
   eps: 1e-8
@@ -104,6 +142,6 @@ es:
 wandb:
   entity: "lichenqi-university-of-regina"
   project: ipd
-  group: 'eval-welfare-${agent1}-vs-${agent2}'
+  group: 'eval-unconstrained-welfare-trainSeed73-${agent1}-vs-${agent2}'
   name: eval-seed-${seed}
   log: True
