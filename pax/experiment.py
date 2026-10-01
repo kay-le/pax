@@ -25,6 +25,7 @@ from pax.agents.hyper.ppo import make_hyper
 from pax.agents.lola.lola import make_lola
 from pax.agents.mfos_ppo.ppo_gru import make_mfos_agent
 from pax.agents.welfare_shaper.welfare_shaper import make_welfare_shaper_agent
+from pax.agents.coala_pg.coala_pg import make_coala_pg_agent
 from pax.agents.naive.naive import make_naive_pg
 from pax.agents.naive_exact import NaiveExact
 from pax.agents.ppo.ppo import make_agent
@@ -85,6 +86,7 @@ from pax.runners.runner_evo_scanned import EvoScannedRunner
 from pax.runners.runner_welfare_evo import WelfareEvoRunner
 from pax.runners.runner_welfare_unconstrained_evo import WelfareUnconstrainedEvoRunner
 from pax.runners.runner_welfare_marl import WelfareRLRunner
+from pax.runners.runner_coala_pg import CoalaPGRunner
 from pax.runners.runner_eval_welfare import WelfareEvalRunner
 
 from pax.envs.iterated_tensor_game_n_player import IteratedTensorGameNPlayer
@@ -552,6 +554,9 @@ def runner_setup(args, env, agents, save_dir, logger):
     elif args.runner == "welfare_rl":
         logger.info("Training with Welfare RL runner (Lagrangian IR)")
         return WelfareRLRunner(agents, env, save_dir, args)
+    elif args.runner == "coala_pg":
+        logger.info("Training with COALA-PG runner (learning-aware PG)")
+        return CoalaPGRunner(agents, env, save_dir, args)
     elif args.runner == "rl":
         logger.info("Training with RL Runner")
         return RLRunner(agents, env, save_dir, args)
@@ -733,6 +738,24 @@ def agent_setup(args, env, env_params, logger):
         """Reuse the Shaper (attention-based PPO) agent for welfare shaping."""
         return get_Shaper_agent(seed, player_id)
 
+    def get_coala_pg_agent(seed, player_id):
+        """COALA-PG shaper (Meulemans et al., ICLR 2025)."""
+        default_player_args = omegaconf.OmegaConf.select(
+            args, "ppo_default", default=None
+        )
+        agent_args = omegaconf.OmegaConf.select(
+            args, "ppo" + str(player_id), default=default_player_args
+        )
+        return make_coala_pg_agent(
+            args,
+            agent_args,
+            obs_spec=obs_shape,
+            num_iterations=args.num_iters,
+            action_spec=num_actions,
+            seed=seed,
+            player_id=player_id,
+        )
+
     def get_hyper_agent(seed, player_id):
         hyper_agent = make_hyper(
             args,
@@ -799,6 +822,7 @@ def agent_setup(args, env, env_params, logger):
         "MFOS": get_mfos_agent,
         "WelfareShaper": get_welfare_shaper_agent,
         "WelfareShaperAtt": get_welfare_shaper_att_agent,
+        "CoalaPG": get_coala_pg_agent,
         # HyperNetworks
         "Hyper": get_hyper_agent,
         "NaiveEx": get_naive_learner,
@@ -934,6 +958,7 @@ def watcher_setup(args, logger):
         "MFOS": dumb_log,
         "WelfareShaper": dumb_log,
         "WelfareShaperAtt": ppo_memory_log,
+        "CoalaPG": ppo_memory_log,
         "PPO": ppo_log,
         "LOLA": dumb_log,
         "PPO_memory": ppo_memory_log,
@@ -1013,7 +1038,12 @@ def main(args):
         print(f"Running {args.runner}")
 
         runner.run_loop(env_params, agent_pair, args.num_iters, watchers)
-    elif args.runner in ["rl", "tensor_rl_nplayer", "welfare_rl"]:
+    elif args.runner in [
+        "rl",
+        "tensor_rl_nplayer",
+        "welfare_rl",
+        "coala_pg",
+    ]:
         # number of episodes
         print(f"Number of Episodes: {args.num_iters}")
         runner.run_loop(env_params, agent_pair, args.num_iters, watchers)
