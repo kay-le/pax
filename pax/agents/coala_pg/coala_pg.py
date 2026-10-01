@@ -468,14 +468,13 @@ class CoalaPG(AgentInterface):
                 random_key=key,
                 timesteps=timesteps + batch_size,
             )
-            new_memory = MemoryState(
-                hidden=jnp.zeros(shape=(self._num_envs,) + (gru_dim,)),
-                extras={
-                    "log_probs": jnp.zeros(self._num_envs),
-                    "values": jnp.zeros(self._num_envs),
-                },
-            )
-            return new_state, new_memory, metrics
+            # Memory is deliberately NOT rebuilt here. The runner owns the
+            # memory's leading dimensions -- [num_opps, num_envs, ...] -- which
+            # this closure cannot know. Rebuilding it as [num_envs, gru_dim]
+            # silently drops the num_opps axis, and the next batch_reset then
+            # vmaps over the wrong axis. `update` hands the caller's memory
+            # straight back instead; the runner resets it per meta-trajectory.
+            return new_state, metrics
 
         def make_initial_state(
             key: Any, initial_hidden_state: jnp.ndarray
@@ -557,8 +556,10 @@ class CoalaPG(AgentInterface):
         `traj_batch` must be time-major with the co-player batch intact:
         ``[M * T, num_opps, num_envs, ...]``. Unlike the stock PPO runners, the
         caller must NOT collapse ``num_opps`` into the batch dimension.
+
+        `mem` is returned unchanged -- see the note in `sgd_step`.
         """
-        state, mem, metrics = self._sgd_step(state, traj_batch)
+        state, metrics = self._sgd_step(state, traj_batch)
         self._logger.metrics["sgd_steps"] += (
             self._num_minibatches * self._num_epochs
         )
