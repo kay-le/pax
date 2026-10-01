@@ -17,7 +17,7 @@
 # across the co-player's minibatch, which is degenerate at B = 1.
 #
 # PPO batch per update = M * T * num_opps * num_envs
-#                      = 16 * 100 * 4 * 16 = 102,400  (divisible by 8)
+#                      = 8 * 20 * 8 * 8 = 10,240  (divisible by 2)
 
 # Agents
 agent1: 'CoalaPG'
@@ -37,40 +37,44 @@ save: True
 save_interval: 200
 
 # Training
-num_envs: 16           # B
-num_opps: 4
-num_outer_steps: 16    # M
-num_inner_steps: 100   # T
+#
+# HORIZON IS LOAD-BEARING. Algorithm 1 needs discount = 1.0 (see coala_pg.py),
+# so undiscounted returns over M*T must stay small enough for the critic to fit.
+# At M=16, T=100 (|return| ~ 3200) the advantage was pure noise and the policy
+# went uniform-random. Here M*T = 160, |return| <~ 280.
+# T=20 departs from the T=100 used by the ES baselines; report this difference
+# rather than silently comparing across different episode lengths.
+num_envs: 8            # B
+num_opps: 8
+num_outer_steps: 8     # M
+num_inner_steps: 20    # T
 num_iters: 2001
 num_devices: 1
 
 # COALA-PG shaper (agent1).
 # NOTE: learning_rate here is a real PG step size, unlike the ES-trained
 # Shaper/M-FOS configs where ppo1.learning_rate is inert. Expect to tune
-# learning_rate, M and B; the paper's IPD hyper-parameters are not reported in
-# a directly transferable form.
+# learning_rate, M and B; this is still a Pax-adapted run because the co-player
+# is the repo's tabular PPO learner rather than the paper's A2C naive learner.
 ppo1:
-  num_minibatches: 8
-  num_epochs: 2
-  # gamma = lambda = 1.0 IS LOAD-BEARING, do not "fix" these to the usual
-  # 0.96 / 0.95. Algorithm 1 is driven with discount = gamma * lambda, applied
-  # uniformly over the long horizon l. At T=100, discount 0.912 decays a
-  # next-episode reward by 0.912^100 ~ 1e-4, which annihilates the
-  # future-episode term -- and that term IS the learning-awareness. The shaper
-  # then becomes myopically self-interested and collapses to always-defect
-  # (measured: 10,012x attenuation; CC probability went to exactly 0.0).
-  # Theorem 3.1's sums are undiscounted over l, so discount must be 1.0.
+  num_minibatches: 2
+  num_epochs: 4
+  # MUST be 1.0 to keep the estimator faithful: Algorithm 1 applies
+  # discount = gamma*lambda uniformly, and any value < 1 attenuates the
+  # future-episode term (the learning-aware signal) by discount**T. At
+  # 0.96/0.95 with T=100 that was a measured 10,012x -> always-defect.
+  # Variance from undiscounted returns is controlled by the short horizon
+  # (M*T = 160) above, not by discounting.
   gamma: 1.0
   gae_lambda: 1.0
+  advantage_normalization: False
+  reward_rescaling: 0.05
   ppo_clipping_epsilon: 0.2
   value_coeff: 0.5
   clip_value: True
-  max_gradient_norm: 0.5
-  # Bumped from 0.02: the first full run saturated to a deterministic
-  # always-defect policy (CC probability exactly 0.0), from which the
-  # cooperative basin is unreachable. Raise further if it saturates again.
+  max_gradient_norm: 1.0
   anneal_entropy: False
-  entropy_coeff_start: 0.05
+  entropy_coeff_start: 0.0
   entropy_coeff_horizon: 2000000
   entropy_coeff_end: 0.001
   lr_scheduling: False
@@ -110,4 +114,3 @@ wandb:
   name: run-seed-${seed}
   log: True
   mode: offline
-  

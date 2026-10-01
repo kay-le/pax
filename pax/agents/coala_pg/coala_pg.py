@@ -43,6 +43,35 @@ Deviations from the paper, deliberately documented
   targets), but when it is fed TD errors to produce a GAE-style advantage the
   recursion must start from zero. This module therefore takes `init_acc`
   explicitly; see `coala_advantages` and `coala_value_targets`.
+-------------------------------------------------------------------------------
+Calibration: gamma, lambda and the horizon M*T are NOT free parameters
+-------------------------------------------------------------------------------
+Algorithm 1 applies a single `discount` (= gamma * lambda) at every step, so the
+future-episode term reaches step l of the current episode attenuated by
+discount**T. Two measured failure modes on IPD (M=16, T=100, B=16):
+
+  gamma=0.96, lambda=0.95  -> discount 0.912, 0.912**100 ~ 1e-4. The
+      future-episode term, i.e. the ENTIRE learning-aware signal, is attenuated
+      10,012x. The shaper becomes myopically self-interested and converges to
+      always-defect (P(cooperate | CC) == 0.0 exactly, DD state prob 0.86).
+
+  gamma=1.0, lambda=1.0    -> discount 1.0, signal intact but ALL variance
+      reduction gone. Theorem 3.1 puts 1/B on the own-episode term but not on
+      the batch-summed future term, so the advantage is dominated by a ~-3000
+      future-episode component against a ~-12.5 action-relevant one. The critic
+      cannot fit a -3200-magnitude target fast enough, the advantage is noise,
+      and the policy degenerates to uniform random (P(cooperate) ~ 0.5 in every
+      state).
+
+Note that decoupling the two discounts does NOT help: the future credit is
+injected at an episode's final step and then still decays through the remaining
+T-1 within-episode steps (verified: weight 1.04e-4, i.e. unchanged).
+
+The operative constraint is therefore the HORIZON. discount must be 1.0 to keep
+the estimator faithful, which forces M*T small enough that undiscounted returns
+stay in a range the critic can fit. The paper's IPD is a finite-horizon
+5-state game, consistent with a much shorter inner episode than the T=100 used
+by the ES baselines in this repo.
 """
 
 from typing import Any, Dict, NamedTuple, Tuple
@@ -244,6 +273,8 @@ class CoalaPG(AgentInterface):
         ppo_clipping_epsilon: float = 0.2,
         gamma: float = 0.96,
         gae_lambda: float = 0.95,
+        advantage_normalization: bool = True,
+        reward_rescaling: float = 1.0,
         player_id: int = 0,
     ):
         @jax.jit
@@ -286,7 +317,10 @@ class CoalaPG(AgentInterface):
             clipped_objective = jnp.fmin(
                 rhos * advantages, clipped_ratios_t * advantages
             )
-            policy_loss = -jnp.mean(clipped_objective)
+            # COALA-PG sums, rather than averages, policy-gradient terms over
+            # the co-player minibatch B. Because minibatches are flattened for
+            # PPO, multiplying the mean by B restores that estimator scaling.
+            policy_loss = -jnp.mean(clipped_objective) * num_envs
 
             unclipped_value_loss = (target_values - values) ** 2
             if clip_value:
@@ -344,11 +378,14 @@ class CoalaPG(AgentInterface):
             dones = sample.dones
             hiddens = sample.hiddens
 
-            seq_len, n_opps, n_envs = rewards.shape[0], rewards.shape[1], rewards.shape[2]
+            seq_len = rewards.shape[0]
+            n_opps = rewards.shape[1]
+            n_envs = rewards.shape[2]
+            learning_rewards = rewards * reward_rescaling
 
             # -> [num_opps, num_envs, L] for Algorithm 1.
             to_alg = lambda x: jnp.transpose(x, (1, 2, 0))
-            r_a = to_alg(rewards)
+            r_a = to_alg(learning_rewards)
             v_a = to_alg(behavior_values)
             d_a = to_alg(dones)
 
@@ -401,9 +438,13 @@ class CoalaPG(AgentInterface):
 
             def model_update_minibatch(carry, minibatch: Batch):
                 params, opt_state, timesteps = carry
-                advantages = (
-                    minibatch.advantages - jnp.mean(minibatch.advantages, axis=0)
-                ) / (jnp.std(minibatch.advantages, axis=0) + 1e-8)
+                if advantage_normalization:
+                    advantages = (
+                        minibatch.advantages
+                        - jnp.mean(minibatch.advantages, axis=0)
+                    ) / (jnp.std(minibatch.advantages, axis=0) + 1e-8)
+                else:
+                    advantages = minibatch.advantages
                 gradients, metrics = grad_fn(
                     params,
                     timesteps,
@@ -461,6 +502,8 @@ class CoalaPG(AgentInterface):
             metrics["coala/advantage_mean"] = jnp.mean(advantages)
             metrics["coala/advantage_std"] = jnp.std(advantages)
             metrics["coala/target_value_mean"] = jnp.mean(target_values)
+            metrics["coala/reward_rescaling"] = jnp.asarray(reward_rescaling)
+            metrics["coala/policy_batch_scale"] = jnp.asarray(n_envs)
 
             new_state = TrainingState(
                 params=params,
@@ -651,5 +694,7 @@ def make_coala_pg_agent(
         ppo_clipping_epsilon=agent_args.ppo_clipping_epsilon,
         gamma=agent_args.gamma,
         gae_lambda=agent_args.gae_lambda,
+        advantage_normalization=agent_args.get("advantage_normalization", True),
+        reward_rescaling=agent_args.get("reward_rescaling", 1.0),
         player_id=player_id,
     )
