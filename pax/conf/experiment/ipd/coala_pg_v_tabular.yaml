@@ -17,7 +17,7 @@
 # across the co-player's minibatch, which is degenerate at B = 1.
 #
 # PPO batch per update = M * T * num_opps * num_envs
-#                      = 8 * 20 * 8 * 8 = 10,240  (divisible by 2)
+#                      = 20 * 10 * 8 * 16 = 25,600  (divisible by 2)
 
 # Agents
 agent1: 'CoalaPG'
@@ -41,13 +41,14 @@ save_interval: 200
 # HORIZON IS LOAD-BEARING. Algorithm 1 needs discount = 1.0 (see coala_pg.py),
 # so undiscounted returns over M*T must stay small enough for the critic to fit.
 # At M=16, T=100 (|return| ~ 3200) the advantage was pure noise and the policy
-# went uniform-random. Here M*T = 160, |return| <~ 280.
-# T=20 departs from the T=100 used by the ES baselines; report this difference
-# rather than silently comparing across different episode lengths.
-num_envs: 8            # B
+# went uniform-random. This run follows the paper-style IPD horizon:
+# B=16, M=20, T=10, so M*T = 200 while preserving the co-player batch size.
+# T=10 departs from the T=100 used by the ES baselines; report this difference
+# or re-run ES at this horizon before making direct table comparisons.
+num_envs: 16           # B
 num_opps: 8
-num_outer_steps: 8     # M
-num_inner_steps: 20    # T
+num_outer_steps: 20    # M
+num_inner_steps: 10    # T
 num_iters: 2001
 num_devices: 1
 
@@ -82,7 +83,7 @@ ppo1:
   adam_epsilon: 1e-5
   with_memory: True
   with_cnn: False
-  hidden_size: 16
+  hidden_size: 64
 
 # Naive co-player (agent2) — identical to the other IPD baselines so the
 # comparison is like-for-like.
