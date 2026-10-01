@@ -52,14 +52,25 @@ num_devices: 1
 ppo1:
   num_minibatches: 8
   num_epochs: 2
-  gamma: 0.96
-  gae_lambda: 0.95
+  # gamma = lambda = 1.0 IS LOAD-BEARING, do not "fix" these to the usual
+  # 0.96 / 0.95. Algorithm 1 is driven with discount = gamma * lambda, applied
+  # uniformly over the long horizon l. At T=100, discount 0.912 decays a
+  # next-episode reward by 0.912^100 ~ 1e-4, which annihilates the
+  # future-episode term -- and that term IS the learning-awareness. The shaper
+  # then becomes myopically self-interested and collapses to always-defect
+  # (measured: 10,012x attenuation; CC probability went to exactly 0.0).
+  # Theorem 3.1's sums are undiscounted over l, so discount must be 1.0.
+  gamma: 1.0
+  gae_lambda: 1.0
   ppo_clipping_epsilon: 0.2
   value_coeff: 0.5
   clip_value: True
   max_gradient_norm: 0.5
+  # Bumped from 0.02: the first full run saturated to a deterministic
+  # always-defect policy (CC probability exactly 0.0), from which the
+  # cooperative basin is unreachable. Raise further if it saturates again.
   anneal_entropy: False
-  entropy_coeff_start: 0.02
+  entropy_coeff_start: 0.05
   entropy_coeff_horizon: 2000000
   entropy_coeff_end: 0.001
   lr_scheduling: False
