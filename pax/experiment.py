@@ -25,7 +25,10 @@ from pax.agents.hyper.ppo import make_hyper
 from pax.agents.lola.lola import make_lola
 from pax.agents.mfos_ppo.ppo_gru import make_mfos_agent
 from pax.agents.welfare_shaper.welfare_shaper import make_welfare_shaper_agent
-from pax.agents.coala_pg.coala_pg import make_coala_pg_agent
+from pax.agents.coala_pg.coala_pg import (
+    make_coala_a2c_agent,
+    make_coala_pg_agent,
+)
 from pax.agents.naive.naive import make_naive_pg
 from pax.agents.naive_exact import NaiveExact
 from pax.agents.ppo.ppo import make_agent
@@ -610,7 +613,7 @@ def agent_setup(args, env, env_params, logger):
             num_iterations=num_iterations,
             player_id=player_id,
         )
-    
+
 
     def get_LOLA_agent(seed, player_id):
         return make_lola(
@@ -756,6 +759,23 @@ def agent_setup(args, env, env_params, logger):
             player_id=player_id,
         )
 
+    def get_coala_a2c_agent(seed, player_id):
+        """Naive A2C co-player used by the COALA-PG paper."""
+        default_player_args = omegaconf.OmegaConf.select(
+            args, "ppo_default", default=None
+        )
+        agent_args = omegaconf.OmegaConf.select(
+            args, "ppo" + str(player_id), default=default_player_args
+        )
+        return make_coala_a2c_agent(
+            args,
+            agent_args,
+            obs_spec=obs_shape,
+            action_spec=num_actions,
+            seed=seed,
+            player_id=player_id,
+        )
+
     def get_hyper_agent(seed, player_id):
         hyper_agent = make_hyper(
             args,
@@ -823,6 +843,7 @@ def agent_setup(args, env, env_params, logger):
         "WelfareShaper": get_welfare_shaper_agent,
         "WelfareShaperAtt": get_welfare_shaper_att_agent,
         "CoalaPG": get_coala_pg_agent,
+        "CoalaA2C": get_coala_a2c_agent,
         # HyperNetworks
         "Hyper": get_hyper_agent,
         "NaiveEx": get_naive_learner,
@@ -959,6 +980,7 @@ def watcher_setup(args, logger):
         "WelfareShaper": dumb_log,
         "WelfareShaperAtt": ppo_memory_log,
         "CoalaPG": ppo_memory_log,
+        "CoalaA2C": ppo_memory_log,
         "PPO": ppo_log,
         "LOLA": dumb_log,
         "PPO_memory": ppo_memory_log,

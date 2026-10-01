@@ -1,6 +1,6 @@
 # @package _global_
 
-# COALA-PG vs Tabular naive learner (IPD)
+# COALA-PG vs paper-style naive A2C learner (IPD)
 #
 # Baseline reimplementation of:
 #   Meulemans et al. (2025), "Multi-agent cooperation through learning-aware
@@ -21,7 +21,7 @@
 
 # Agents
 agent1: 'CoalaPG'
-agent2: 'Tabular'      # naive learner, matching the shaper-vs-naive comparison
+agent2: 'CoalaA2C'     # naive A2C co-player from the COALA-PG paper
 
 # Environment
 env_id: iterated_matrix_game
@@ -54,9 +54,9 @@ num_devices: 1
 
 # COALA-PG shaper (agent1).
 # NOTE: learning_rate here is a real PG step size, unlike the ES-trained
-# Shaper/M-FOS configs where ppo1.learning_rate is inert. Expect to tune
-# learning_rate, M and B; this is still a Pax-adapted run because the co-player
-# is the repo's tabular PPO learner rather than the paper's A2C naive learner.
+# Shaper/M-FOS configs where ppo1.learning_rate is inert. The recurrent torso
+# uses the paper's IPD dimensions (width 32, zero-initialized policy/value
+# heads), with a local Hawk-style fallback because Pax does not ship Hawk/LRU.
 ppo1:
   num_minibatches: 2
   num_epochs: 4
@@ -65,7 +65,7 @@ ppo1:
   # future-episode term (the learning-aware signal) by discount**T. At
   # 0.96/0.95 with T=100 that was a measured 10,012x -> always-defect.
   # Variance from undiscounted returns is controlled by the short horizon
-  # (M*T = 160) above, not by discounting.
+  # (M*T = 200) above, not by discounting.
   gamma: 1.0
   gae_lambda: 1.0
   advantage_normalization: False
@@ -83,29 +83,30 @@ ppo1:
   adam_epsilon: 1e-5
   with_memory: True
   with_cnn: False
-  hidden_size: 64
+  hidden_size: 32
 
-# Naive co-player (agent2) — identical to the other IPD baselines so the
-# comparison is like-for-like.
+# Naive co-player (agent2): A2C settings from Table 8 of the paper.
 ppo2:
-  num_minibatches: 4
-  num_epochs: 2
-  gamma: 0.96
-  gae_lambda: 0.95
+  num_minibatches: 1
+  num_epochs: 1
+  gamma: 0.99
+  gae_lambda: 1.0
+  advantage_normalization: True
+  reward_rescaling: 0.05
   ppo_clipping_epsilon: 0.2
   value_coeff: 0.5
   clip_value: True
-  max_gradient_norm: 0.5
+  max_gradient_norm: 1.0
   anneal_entropy: False
-  entropy_coeff_start: 0.02
+  entropy_coeff_start: 0.0
   entropy_coeff_horizon: 2000000
   entropy_coeff_end: 0.001
   lr_scheduling: False
-  learning_rate: 1
+  learning_rate: 0.005
   adam_epsilon: 1e-5
   with_memory: True
   with_cnn: False
-  hidden_size: 16
+  hidden_size: 32
 
 # Logging setup
 wandb:

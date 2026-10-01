@@ -383,9 +383,7 @@ class CoalaPGRunner:
                     agent1._logger.metrics = (
                         agent1._logger.metrics | flat_a1
                     )
-                    flat_a2 = jax.tree_util.tree_map(
-                        lambda x: jnp.sum(jnp.mean(x, 1)), a2_metrics
-                    )
+                    flat_a2 = jax.tree_util.tree_map(jnp.mean, a2_metrics)
                     agent2._logger.metrics = (
                         agent2._logger.metrics | flat_a2
                     )

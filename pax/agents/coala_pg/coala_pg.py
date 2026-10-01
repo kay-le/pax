@@ -76,6 +76,7 @@ by the ES baselines in this repo.
 
 from typing import Any, Dict, NamedTuple, Tuple
 
+import distrax
 import haiku as hk
 import jax
 import jax.numpy as jnp
@@ -85,9 +86,120 @@ from pax import utils
 from pax.agents.agent import AgentInterface
 from pax.agents.ppo.networks import (
     make_GRU_coingame_network,
-    make_GRU_ipd_network,
 )
 from pax.utils import MemoryState, TrainingState
+
+
+class RMSNorm(hk.Module):
+    """RMSNorm used by the paper's Hawk backbone."""
+
+    def __init__(self, eps: float = 1e-6, name: str | None = None):
+        super().__init__(name=name)
+        self._eps = eps
+
+    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+        scale = hk.get_parameter(
+            "scale", shape=(x.shape[-1],), init=jnp.ones
+        )
+        rms = jnp.sqrt(jnp.mean(jnp.square(x), axis=-1, keepdims=True) + self._eps)
+        return x / rms * scale
+
+
+class CoalaIpdTorso(hk.Module):
+    """IPD recurrent torso matching the paper dimensions.
+
+    The paper uses a Hawk block (LRU width 32, MLP expanded width 32, 2 heads).
+    Pax does not ship Hawk/LRU layers, so this is a self-contained, diagonal
+    gated recurrent fallback with the same embedding/recurrent width and a
+    residual MLP block. Policy/value heads are still zero-initialized as in the
+    paper.
+    """
+
+    def __init__(self, width: int = 32, num_heads: int = 2):
+        super().__init__(name="coala_ipd_torso")
+        if width % num_heads != 0:
+            raise ValueError("width must be divisible by num_heads")
+        self._width = width
+        self._num_heads = num_heads
+
+    def __call__(
+        self, observations: jnp.ndarray, state: jnp.ndarray
+    ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        x = hk.Linear(
+            self._width,
+            w_init=hk.initializers.VarianceScaling(1.0, "fan_avg", "uniform"),
+            b_init=hk.initializers.Constant(0),
+            name="obs_embedding",
+        )(observations)
+
+        # Two-head diagonal recurrent update. This keeps the paper's "2 heads"
+        # structure without adding an unavailable Hawk dependency.
+        head_dim = self._width // self._num_heads
+        x_h = jnp.reshape(x, x.shape[:-1] + (self._num_heads, head_dim))
+        s_h = jnp.reshape(state, state.shape[:-1] + (self._num_heads, head_dim))
+
+        gate = jax.nn.sigmoid(
+            hk.Linear(self._width, name="gate_x")(x)
+            + hk.Linear(self._width, with_bias=False, name="gate_h")(state)
+        )
+        cand = jnp.tanh(
+            hk.Linear(self._width, name="cand_x")(x)
+            + hk.Linear(self._width, with_bias=False, name="cand_h")(state)
+        )
+        gate_h = jnp.reshape(gate, gate.shape[:-1] + (self._num_heads, head_dim))
+        cand_h = jnp.reshape(cand, cand.shape[:-1] + (self._num_heads, head_dim))
+        new_state_h = gate_h * s_h + (1.0 - gate_h) * cand_h
+        new_state = jnp.reshape(new_state_h, state.shape)
+
+        y = x + new_state
+        mlp = hk.nets.MLP(
+            [self._width, self._width],
+            w_init=hk.initializers.VarianceScaling(1.0, "fan_avg", "uniform"),
+            b_init=hk.initializers.Constant(0),
+            activation=jax.nn.gelu,
+            activate_final=False,
+            name="mlp",
+        )(y)
+        y = RMSNorm(name="rms_norm")(y + mlp)
+        return y, new_state
+
+
+class ZeroInitCategoricalValueHead(hk.Module):
+    """Policy/value readouts with zero initialization, per Appendix B.3."""
+
+    def __init__(self, num_actions: int):
+        super().__init__(name="zero_init_categorical_value_head")
+        self._num_actions = num_actions
+
+    def __call__(self, inputs: jnp.ndarray):
+        logits = hk.Linear(
+            self._num_actions,
+            w_init=hk.initializers.Constant(0),
+            b_init=hk.initializers.Constant(0),
+            name="policy_logits",
+        )(inputs)
+        value = hk.Linear(
+            1,
+            w_init=hk.initializers.Constant(0),
+            b_init=hk.initializers.Constant(0),
+            name="value",
+        )(inputs)
+        return distrax.Categorical(logits=logits), jnp.squeeze(value, axis=-1)
+
+
+def make_coala_ipd_network(num_actions: int, hidden_size: int = 32):
+    """Build the shared IPD recurrent policy/value network from the paper."""
+    hidden_state = jnp.zeros((1, hidden_size))
+
+    def forward_fn(
+        observations: jnp.ndarray, state: jnp.ndarray
+    ) -> Tuple[Tuple[distrax.Categorical, jnp.ndarray], jnp.ndarray]:
+        embedding, state = CoalaIpdTorso(width=hidden_size)(observations, state)
+        dist, value = ZeroInitCategoricalValueHead(num_actions)(embedding)
+        return (dist, value), state
+
+    network = hk.without_apply_rng(hk.transform(forward_fn))
+    return network, hidden_state
 
 
 class Batch(NamedTuple):
@@ -617,6 +729,221 @@ class CoalaPG(AgentInterface):
         return state, mem, metrics
 
 
+class CoalaA2C(AgentInterface):
+    """Naive A2C co-player used in the COALA-PG paper's IPD experiments."""
+
+    def __init__(
+        self,
+        network: NamedTuple,
+        initial_hidden_state: jnp.ndarray,
+        optimizer: optax.GradientTransformation,
+        random_key: jnp.ndarray,
+        obs_spec: Tuple,
+        num_envs: int = 16,
+        num_inner_steps: int = 10,
+        gamma: float = 0.99,
+        gae_lambda: float = 1.0,
+        value_coeff: float = 0.5,
+        entropy_coeff: float = 0.0,
+        reward_rescaling: float = 0.05,
+        advantage_normalization: bool = True,
+        player_id: int = 0,
+    ):
+        hidden_size = initial_hidden_state.shape[-1]
+
+        @jax.jit
+        def policy(
+            state: TrainingState, observation: jnp.ndarray, mem: MemoryState
+        ):
+            key, subkey = jax.random.split(state.random_key)
+            (dist, values), hidden_state = network.apply(
+                state.params, observation, mem.hidden
+            )
+            actions, log_probs = dist.sample_and_log_prob(seed=subkey)
+            mem.extras["values"] = values
+            mem.extras["log_probs"] = log_probs
+            mem = mem._replace(hidden=hidden_state, extras=mem.extras)
+            state = state._replace(random_key=key)
+            return actions, state, mem
+
+        def a2c_returns(rewards: jnp.ndarray) -> jnp.ndarray:
+            """Discounted length-T returns without value bootstrapping."""
+
+            def step(acc, reward_t):
+                acc = reward_t + gamma * acc
+                return acc, acc
+
+            _, out = jax.lax.scan(
+                step,
+                jnp.zeros_like(rewards[-1]),
+                jnp.flip(rewards, axis=0),
+            )
+            return jnp.flip(out, axis=0)
+
+        def loss(
+            params: hk.Params,
+            observations: jnp.ndarray,
+            actions: jnp.ndarray,
+            returns: jnp.ndarray,
+            advantages: jnp.ndarray,
+            hiddens: jnp.ndarray,
+        ):
+            (distribution, values), _ = network.apply(
+                params, observations, hiddens
+            )
+            log_probs = distribution.log_prob(actions)
+            entropy = distribution.entropy()
+
+            policy_loss = -jnp.mean(log_probs * jax.lax.stop_gradient(advantages))
+            value_loss = jnp.mean((returns - values) ** 2)
+            entropy_loss = -jnp.mean(entropy)
+            total_loss = (
+                policy_loss + value_coeff * value_loss + entropy_coeff * entropy_loss
+            )
+            return total_loss, {
+                "loss_total": total_loss,
+                "loss_policy": policy_loss,
+                "loss_value": value_loss,
+                "loss_entropy": entropy_loss,
+            }
+
+        @jax.jit
+        def sgd_step(state: TrainingState, sample: NamedTuple):
+            rewards = sample.rewards * reward_rescaling
+            returns = a2c_returns(rewards)
+            advantages = returns - sample.behavior_values
+            if advantage_normalization:
+                advantages = (
+                    advantages - jnp.mean(advantages)
+                ) / (jnp.std(advantages) + 1e-8)
+
+            batch_size = returns.shape[0] * returns.shape[1]
+            flat = Batch(
+                observations=sample.observations.reshape(
+                    (batch_size,) + sample.observations.shape[2:]
+                ),
+                actions=sample.actions.reshape((batch_size,) + sample.actions.shape[2:]),
+                advantages=advantages.reshape((batch_size,)),
+                target_values=returns.reshape((batch_size,)),
+                behavior_values=sample.behavior_values.reshape((batch_size,)),
+                behavior_log_probs=sample.behavior_log_probs.reshape((batch_size,)),
+                hiddens=sample.hiddens.reshape(
+                    (batch_size,) + sample.hiddens.shape[2:]
+                ),
+            )
+
+            grad_fn = jax.grad(loss, has_aux=True)
+            gradients, metrics = grad_fn(
+                state.params,
+                flat.observations,
+                flat.actions,
+                flat.target_values,
+                flat.advantages,
+                flat.hiddens,
+            )
+            updates, opt_state = optimizer.update(gradients, state.opt_state)
+            params = optax.apply_updates(state.params, updates)
+            metrics["norm_grad"] = optax.global_norm(gradients)
+            metrics["norm_updates"] = optax.global_norm(updates)
+            metrics["rewards_mean"] = jnp.mean(sample.rewards)
+            metrics["a2c/return_mean"] = jnp.mean(returns)
+            metrics["a2c/advantage_std"] = jnp.std(advantages)
+
+            new_state = TrainingState(
+                params=params,
+                opt_state=opt_state,
+                random_key=state.random_key,
+                timesteps=state.timesteps + batch_size,
+            )
+            new_mem = MemoryState(
+                hidden=jnp.zeros((num_envs, hidden_size)),
+                extras={
+                    "values": jnp.zeros(num_envs),
+                    "log_probs": jnp.zeros(num_envs),
+                },
+            )
+            return new_state, new_mem, metrics
+
+        def make_initial_state(
+            key: Any, initial_hidden: jnp.ndarray
+        ) -> Tuple[TrainingState, MemoryState]:
+            key, subkey = jax.random.split(key)
+            if isinstance(obs_spec, dict):
+                dummy_obs = {k: jnp.zeros(shape=v) for k, v in obs_spec.items()}
+            else:
+                dummy_obs = jnp.zeros(shape=obs_spec)
+            dummy_obs = utils.add_batch_dim(dummy_obs)
+            # The COALA runner vmaps agent2 initialization over random keys but
+            # passes a shared hidden argument because older opponents ignored it.
+            # Initialize parameters with the canonical single-batch hidden.
+            initial_params = network.init(subkey, dummy_obs, initial_hidden_state)
+            initial_opt_state = optimizer.init(initial_params)
+            self.optimizer = optimizer
+            return TrainingState(
+                random_key=key,
+                params=initial_params,
+                opt_state=initial_opt_state,
+                timesteps=0,
+            ), MemoryState(
+                hidden=jnp.zeros((num_envs, hidden_size)),
+                extras={
+                    "values": jnp.zeros(num_envs),
+                    "log_probs": jnp.zeros(num_envs),
+                },
+            )
+
+        self._state, self._mem = make_initial_state(
+            random_key, initial_hidden_state
+        )
+        self.make_initial_state = make_initial_state
+        self._policy = policy
+        self._sgd_step = sgd_step
+        self.network = network
+        self.forward = network.apply
+        self.player_id = player_id
+        self._num_envs = num_envs
+        self._num_inner_steps = num_inner_steps
+        self._hidden_size = hidden_size
+
+        self._logger = Logger()
+        self._logger.metrics = {
+            "total_steps": 0,
+            "sgd_steps": 0,
+            "loss_total": 0,
+            "loss_policy": 0,
+            "loss_value": 0,
+            "loss_entropy": 0,
+        }
+
+    def reset_memory(self, memory, eval=False) -> MemoryState:
+        num_envs = 1 if eval else self._num_envs
+        return memory._replace(
+            hidden=jnp.zeros((num_envs, self._hidden_size)),
+            extras={
+                "values": jnp.zeros(num_envs),
+                "log_probs": jnp.zeros(num_envs),
+            },
+        )
+
+    def update(
+        self,
+        traj_batch: NamedTuple,
+        obs: jnp.ndarray,
+        state: TrainingState,
+        mem: MemoryState,
+    ):
+        state, mem, metrics = self._sgd_step(state, traj_batch)
+        self._logger.metrics["sgd_steps"] += 1
+        for k in (
+            "loss_total",
+            "loss_policy",
+            "loss_value",
+            "loss_entropy",
+        ):
+            self._logger.metrics[k] = metrics[k]
+        return state, mem, metrics
+
+
 def make_coala_pg_agent(
     args,
     agent_args,
@@ -632,7 +959,7 @@ def make_coala_pg_agent(
         "iterated_tensor_game",
         "iterated_nplayer_tensor_game",
     ):
-        network, initial_hidden_state = make_GRU_ipd_network(
+        network, initial_hidden_state = make_coala_ipd_network(
             action_spec, agent_args.hidden_size
         )
     elif args.env_id == "coin_game":
@@ -696,5 +1023,46 @@ def make_coala_pg_agent(
         gae_lambda=agent_args.gae_lambda,
         advantage_normalization=agent_args.get("advantage_normalization", True),
         reward_rescaling=agent_args.get("reward_rescaling", 1.0),
+        player_id=player_id,
+    )
+
+
+def make_coala_a2c_agent(
+    args,
+    agent_args,
+    obs_spec,
+    action_spec,
+    seed: int,
+    player_id: int,
+):
+    """Build the paper-style naive A2C co-player for IPD."""
+    if args.env_id != "iterated_matrix_game":
+        raise NotImplementedError(
+            "CoalaA2C is implemented only for iterated_matrix_game/IPD."
+        )
+
+    network, initial_hidden_state = make_coala_ipd_network(
+        action_spec, agent_args.hidden_size
+    )
+    optimizer = optax.chain(
+        optax.clip_by_global_norm(agent_args.max_gradient_norm),
+        optax.scale_by_adam(eps=agent_args.adam_epsilon),
+        optax.scale(-agent_args.learning_rate),
+    )
+    random_key = jax.random.PRNGKey(seed=seed)
+    return CoalaA2C(
+        network=network,
+        initial_hidden_state=initial_hidden_state,
+        optimizer=optimizer,
+        random_key=random_key,
+        obs_spec=obs_spec,
+        num_envs=args.num_envs,
+        num_inner_steps=args.num_inner_steps,
+        gamma=agent_args.gamma,
+        gae_lambda=agent_args.gae_lambda,
+        value_coeff=agent_args.value_coeff,
+        entropy_coeff=agent_args.entropy_coeff_start,
+        reward_rescaling=agent_args.get("reward_rescaling", 0.05),
+        advantage_normalization=agent_args.get("advantage_normalization", True),
         player_id=player_id,
     )
