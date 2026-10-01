@@ -34,7 +34,7 @@ runner: coala_pg
 
 # Save
 save: True
-save_interval: 100
+save_interval: 200
 
 # Training
 num_envs: 16           # B
@@ -99,3 +99,4 @@ wandb:
   name: run-seed-${seed}
   log: True
   mode: offline
+  

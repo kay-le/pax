@@ -408,8 +408,18 @@ class CoalaPGRunner:
                             "train/first_episode/player_2": first_2,
                             "train/final_episode/player_1": last_1,
                             "train/final_episode/player_2": last_2,
+                            # Shaping signal: how much the co-player's return
+                            # improved from the first to the last inner episode.
+                            "train/shaping_delta/player_2": last_2 - first_2,
                         }
-                        | {k: float(v) for k, v in env_stats.items()},
+                        | {k: float(v) for k, v in env_stats.items()}
+                        # The shared `ppo_memory_log` watcher logs nothing for
+                        # this agent, so surface the COALA-PG diagnostics
+                        # (advantage magnitudes, losses, grad norms) here.
+                        | {
+                            f"train/shaper/{k}": float(v)
+                            for k, v in flat_a1.items()
+                        },
                     )
 
         agents[0]._state = a1_state
