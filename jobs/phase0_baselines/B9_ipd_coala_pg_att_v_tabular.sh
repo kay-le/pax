@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # Unified launcher for B9 IPD COALA-PG vs tabular
 #
 # COALA-PG baseline: Meulemans et al. (2025), "Multi-agent cooperation through

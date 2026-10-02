@@ -805,6 +805,7 @@ class CoalaA2C(AgentInterface):
                 "loss_policy": policy_loss,
                 "loss_value": value_loss,
                 "loss_entropy": entropy_loss,
+                "entropy_cost": jnp.asarray(entropy_coeff),
             }
 
         @jax.jit
@@ -913,6 +914,7 @@ class CoalaA2C(AgentInterface):
             "loss_policy": 0,
             "loss_value": 0,
             "loss_entropy": 0,
+            "entropy_cost": entropy_coeff,
         }
 
     def reset_memory(self, memory, eval=False) -> MemoryState:
@@ -939,6 +941,7 @@ class CoalaA2C(AgentInterface):
             "loss_policy",
             "loss_value",
             "loss_entropy",
+            "entropy_cost",
         ):
             self._logger.metrics[k] = metrics[k]
         return state, mem, metrics
