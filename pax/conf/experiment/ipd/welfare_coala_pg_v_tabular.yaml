@@ -21,14 +21,14 @@ coala_objective: welfare
 
 # Save
 save: True
-save_interval: 200
+save_interval: 1000
 
 # Training
 num_envs: 16           # B
 num_opps: 8
 num_outer_steps: 20    # M
 num_inner_steps: 10    # T
-num_iters: 2001
+num_iters: 3001
 num_devices: 1
 
 # COALA-PG shaper (agent1), welfare objective.
