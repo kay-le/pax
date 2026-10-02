@@ -90,6 +90,12 @@ class CoalaPGRunner:
 
         agent1, agent2 = agents
         num_outer_steps = args.num_outer_steps
+        coala_objective = args.get("coala_objective", "selfish")
+        if coala_objective not in ("selfish", "welfare"):
+            raise ValueError(
+                "coala_objective must be 'selfish' or 'welfare'. "
+                f"Got {coala_objective}."
+            )
 
         # ---- agent 1 (COALA-PG shaper): batched over num_opps ----
         agent1.batch_init = jax.vmap(
@@ -280,10 +286,21 @@ class CoalaPGRunner:
             ) = vals
             traj_1, traj_2, a2_metrics = stack
 
-            # COALA-PG update over the whole meta-trajectory.
-            long_traj_1 = to_long_trajectory(traj_1)
+            # COALA-PG update over the whole meta-trajectory. The standard
+            # paper baseline is selfish (`r_1`). The welfare variant changes
+            # only the optimizer objective to utilitarian welfare (`r_1+r_2`).
+            if coala_objective == "welfare":
+                objective_traj_1 = traj_1._replace(
+                    rewards=traj_1.rewards + traj_2.rewards
+                )
+            else:
+                objective_traj_1 = traj_1
+            long_traj_1 = to_long_trajectory(objective_traj_1)
             a1_state, a1_mem, a1_metrics = agent1.update(
                 long_traj_1, obs1, a1_state, a1_mem
+            )
+            a1_metrics["coala/objective_is_welfare"] = jnp.asarray(
+                coala_objective == "welfare"
             )
 
             # Per-episode returns: [M, num_opps, num_envs] -> [M]

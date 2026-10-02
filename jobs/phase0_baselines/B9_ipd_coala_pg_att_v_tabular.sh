@@ -6,7 +6,7 @@ set -euo pipefail
 # learning-aware policy gradients", ICLR 2025 (arXiv:2410.18636).
 #
 # Usage:
-#   bash B9_ipd_coala_pg_att_v_tabular.sh <platform> <seed> [wandb_mode]
+#   bash B9_ipd_coala_pg_att_v_tabular.sh <platform> <seed> [wandb_mode] [experiment]
 #
 # Platforms:
 #   fir        — Fir cluster, 1×H100 MIG slice
@@ -22,10 +22,12 @@ set -euo pipefail
 #   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0
 #   bash B9_ipd_coala_pg_att_v_tabular.sh tri 0
 #   bash B9_ipd_coala_pg_att_v_tabular.sh tri-debug 0
+#   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline welfare_coala_pg_v_tabular
 
 PLATFORM=${1:-tri}
 SEED=${2:-0}
 WANDB_MODE_ARG=${3:-offline}
+EXPERIMENT_NAME=${4:-coala_pg_v_tabular}
 
 # ──────────────────────────────────────────────────────────────────
 # Auto-submit: if not already running under SLURM, sbatch ourselves
@@ -96,14 +98,18 @@ export WANDB__SERVICE_WAIT=180
 export WANDB_INIT_TIMEOUT=180
 export WANDB_START_METHOD=thread
 
-EXPERIMENT="ipd=coala_pg_v_tabular"
-RESULTS_DIR="/scratch/lichenqi/results/B9_coala_ipd_seed${SEED}"
+EXPERIMENT="ipd=${EXPERIMENT_NAME}"
+if [ "$EXPERIMENT_NAME" = "coala_pg_v_tabular" ]; then
+    RESULTS_DIR="/scratch/lichenqi/results/B9_coala_ipd_seed${SEED}"
+else
+    RESULTS_DIR="/scratch/lichenqi/results/B9_${EXPERIMENT_NAME}_seed${SEED}"
+fi
 HYDRA_DIR="$TMPDIR/hydra_output"
 EXP_OUTPUT="$HYDRA_DIR/exp"
 mkdir -p "$RESULTS_DIR"
 
 start_time=$(date +%s)
-echo "=== B9 COALA-PG | Platform: $PLATFORM | Seed: $SEED | wandb: $WANDB_MODE_ARG | $(date '+%Y-%m-%d %H:%M:%S') ==="
+echo "=== B9 COALA-PG | Experiment: $EXPERIMENT_NAME | Platform: $PLATFORM | Seed: $SEED | wandb: $WANDB_MODE_ARG | $(date '+%Y-%m-%d %H:%M:%S') ==="
 
 cd /project/def-jtyao/lichenqi/pax
 
