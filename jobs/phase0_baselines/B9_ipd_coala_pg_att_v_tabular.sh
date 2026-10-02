@@ -30,7 +30,7 @@ WANDB_MODE_ARG=${3:-offline}
 # ──────────────────────────────────────────────────────────────────
 # Auto-submit: if not already running under SLURM, sbatch ourselves
 # ──────────────────────────────────────────────────────────────────
-if [ -z "$SLURM_JOB_ID" ]; then
+if [ -z "${SLURM_JOB_ID:-}" ]; then
     case "$PLATFORM" in
         fir)
             sbatch \
