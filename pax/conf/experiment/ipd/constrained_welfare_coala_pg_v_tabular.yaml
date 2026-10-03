@@ -37,9 +37,20 @@ num_inner_steps: 10    # T
 num_iters: 3001
 num_devices: 1
 
-# Constrained welfare settings. With T=10, mutual defection is roughly -20 per
-# episode, matching the old T=100 baseline reference of -200 after rescaling by
-# horizon length.
+# Constrained welfare settings.
+#
+# CHOOSING v_ref. With T=10 the per-episode return range is about -10 (all-CC)
+# to -20 (all-DD), so v_ref must sit strictly inside that band to bind:
+#   -20.0  the constraint never activates. Measured: mu stayed at 0.0 for all
+#          3000 iterations and slack was +5 to +9, i.e. the run was plain
+#          welfare COALA-PG (w = (1,1)) with dead constraint machinery. It
+#          converged well (CC 0.99, DD 0.02, welfare -25.6).
+#   -15.0  infeasible for the shaper: its meta-mean averages over the early
+#          inner episodes where the freshly initialised co-player still
+#          defects, so -1.5/step is unreachable at M=20. Measured: mu1 wound
+#          up to 50 and rho1 pinned at rho_max, and the policy went
+#          uniform-random (cooperation probability 0.20 at every state).
+#   -17.0  the binding region. Sweep -18 / -17 / -16 for the frontier.
 welfare:
   rho1: 1.0
   rho2: 1.0
@@ -49,9 +60,26 @@ welfare:
   mu1: 0.0
   mu2: 0.0
   dual_lr: 0.002
-  calibration: False
-  v_ref_shaper: -20.0
-  v_ref_opponent: -20.0
+  calibration: False      # not implemented for runner=coala_pg; must be False
+  v_ref_shaper: -17.0
+  v_ref_opponent: -17.0
+
+  # PG-specific safeguards. `runner_welfare_evo` needs none of these: ES has no
+  # critic, so a uniform rescaling of its Lagrangian fitness is absorbed by
+  # Adam. Here the Lagrangian enters as a reward weight, so an unbounded weight
+  # is an unbounded reward scale feeding a critic that regresses undiscounted
+  # returns over M*T steps. All three are no-ops whenever the constraints are
+  # slack (mu=0, w=(1,1)), so they cannot change the -20.0 result above.
+  mu_max: 5.0               # cap the dual variable; stops integrator windup
+  weight_max: 10.0          # hard cap on 1 + mu + rho*max(0,-s)
+  weight_normalization: True  # divide the reward stream by the mean weight, so
+                              # the critic sees a stationary target scale and
+                              # only the player-to-player weight RATIO (the
+                              # actual Lagrangian direction) reaches the policy
+  slack_per_episode: True   # resolve the slack per inner episode, not once per
+                            # meta-trajectory, so the quadratic penalty varies
+                            # along M the way the ES penalty varies across
+                            # population members
 
 # COALA-PG shaper (agent1), constrained welfare objective.
 ppo1:
