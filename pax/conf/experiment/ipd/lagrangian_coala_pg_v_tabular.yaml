@@ -2,22 +2,35 @@
 
 # Lagrangian constrained-welfare COALA-PG vs paper-style naive A2C learner (IPD)
 #
-#   max_theta  W(theta)        s.t.  R_s(theta) >= tau
-#   L(theta, lam) = W + lam * (R_s - tau)
+#   max_theta  W(theta)
+#   s.t.       R_s(theta) >= tau_s        (shaper individual rationality)
+#              R_o(theta) >= tau_o        (co-player individual rationality)
 #
-# Because the constraint is itself an expected return, the Lagrangian gradient
+#   L = W + lam_s * (R_s - tau_s) + lam_o * (R_o - tau_o)
+#
+# TWO constraints, matching `runner_welfare_evo` (there: mu1/mu2 against
+# v_ref_shaper/v_ref_opponent). They do different jobs, which is why one is not
+# enough: lam_s pulls the shaper back from self-sacrifice, lam_o protects the
+# co-player from being exploited. With only lam_s the co-player's sole defence
+# is the welfare term, and welfare is indifferent between (-10, -30) and
+# (-30, -10) -- so the "cooperation" reached could be an exploitative split
+# that happens to sum well.
+#
+# Because each constraint is itself an expected return, the Lagrangian gradient
 # is the stock COALA-PG gradient of a reshaped reward:
 #
-#   r_mix = (r_s + r_o) + lam * r_s = (1 + lam) * r_s + r_o
+#   r_mix = (r_s + r_o) + lam_s * r_s + lam_o * r_o
+#         = (1 + lam_s) * r_s + (1 + lam_o) * r_o
 #
 # The learning-aware estimator (Algorithm 1), the rollout structure and the
 # co-player are all UNCHANGED from coala_pg_v_tabular.yaml. That is deliberate:
 # it makes the selfish / welfare / constrained comparison a statement about the
 # objective, not the optimizer.
 #
-# Dual update: PID Lagrangian (Stooke, Achiam & Abbeel, ICML 2020).
-# Setting kp = kd = 0 recovers RCPO (Tessler et al. 2019) dual ascent exactly,
-# so the dual-ascent baseline is this same file with two gains zeroed.
+# Dual update: PID Lagrangian (Stooke, Achiam & Abbeel, ICML 2020), one
+# controller per constraint. Setting a constraint's kp = kd = 0 recovers RCPO
+# (Tessler et al. 2019) dual ascent exactly, so the dual-ascent baseline is
+# this same file with those gains zeroed.
 
 # Agents
 agent1: 'CoalaPGLagrangian'
@@ -45,74 +58,82 @@ num_iters: 3001
 num_devices: 1
 
 welfare:
-  # ---- the constraint ----
+  # ---- shared defaults; any constraint below may override any of these ----
   #
-  # tau is PER INNER EPISODE, so it can be read straight off the payoff matrix.
-  # At T=10 the per-episode range is -10 (all-CC) to -20 (all-DD).
-  #
-  # -20.0 is the shaper's SECURITY LEVEL: the mutual-defection payoff, i.e.
-  # what she can guarantee herself by refusing to shape at all. With tau at the
-  # security level the constraint is exactly the individual-rationality
-  # condition from cooperative game theory, and "self-sacrifice" becomes the
-  # well-defined event R_s < tau rather than an arbitrary threshold. That is
-  # the interpretable default and what the paper should report.
-  #
-  # Raise it (e.g. -17.5) only to ask the separate question "how much better
-  # than her security level can the shaper be made to do", and say so.
-  tau: -20.0
-
-  # ---- the constraint window ----
-  #
-  # 0 (or >= M) constrains the shaper's mean return over the WHOLE
-  # meta-episode. That can be satisfied by exploiting the co-player early and
-  # being exploited late, after it has converged -- the opposite of "shaping
-  # established cooperation". Setting this to K constrains only the last K
-  # inner episodes, making tau a statement about where the co-player ENDS UP.
-  # COALA-PG's estimator already credits rewards that appear only late in the
-  # meta-episode, so this costs nothing in the gradient.
-  #
-  # 5 of 20 episodes: the last quarter, after the naive A2C learner has had 15
-  # episodes to converge.
-  constraint_window: 5
-
-  # ---- PID dual update (Stooke et al. 2020) ----
-  #
-  # Tune kp FIRST with ki small and kd = 0; add kd only if lam still lags into
-  # violations. kp = kd = 0 gives exactly RCPO dual ascent with lr = ki, which
-  # is the baseline worth reporting alongside.
+  # PID gains. Tune kp FIRST with ki small and kd = 0; add kd only if lam lags
+  # into violations. kp = kd = 0 gives exactly RCPO dual ascent with lr = ki,
+  # which is the baseline worth reporting alongside.
   kp: 0.05      # proportional: reacts to the CURRENT violation
   ki: 0.005     # integral: the dual-ascent term (the only one RCPO has)
   kd: 0.1       # derivative: reacts to the violation GETTING WORSE
   #
-  # lam_init > 0 on purpose. Early in meta-training the constraint is often
+  # lam_init > 0 on purpose. Early in meta-training a constraint is often
   # satisfied by accident, so a lam starting at 0 only decays; by the time real
-  # violations appear the shaper has already learnt to sacrifice and lam must
-  # climb from nothing to undo it.
+  # violations appear the shaper has already learnt to sacrifice (or to
+  # exploit) and lam must climb from nothing to undo it.
   lam_init: 0.5
   #
   # null leaves lam unbounded (the textbook method). A finite cap bounds how
-  # far the objective can be tilted toward the shaper, at the cost of exact
-  # feasibility -- note that lam = 4 already means (1 + lam) = 5x weight on
-  # r_s, i.e. an essentially selfish objective.
+  # far the objective can be tilted toward one player, at the cost of exact
+  # feasibility -- note lam = 4 already means (1 + lam) = 5x weight on that
+  # player, i.e. the welfare term is effectively gone.
   lam_max: null
   #
   # COALA-PG meta-trajectory returns are noisy, and a derivative term on raw
   # noise is mostly noise. 0.9 smooths the measurement the controller sees
   # (not the one that is logged). Set to 0.0 to disable.
   ema_beta: 0.9
+  #
+  # CONSTRAINT WINDOW. 0 (or >= M) constrains a player's mean return over the
+  # WHOLE meta-episode. That can be satisfied early and violated late, after
+  # the co-player has converged -- the opposite of "shaping established
+  # cooperation". K constrains only the last K inner episodes, making tau a
+  # statement about where the co-player ENDS UP. COALA-PG's estimator already
+  # credits rewards that appear only late, so this costs nothing in the
+  # gradient. 5 of 20 = the last quarter, after the naive A2C learner has had
+  # 15 episodes to converge.
+  constraint_window: 5
+
+  # ---- the constraints themselves ----
+  #
+  # One entry per individual-rationality condition. `player` is 'shaper' or
+  # 'co-player'; `tau` is PER INNER EPISODE, so it can be read straight off
+  # the payoff matrix. At T=10 the per-episode range is -10 (all-CC) to
+  # -20 (all-DD).
+  #
+  # -20.0 is each player's SECURITY LEVEL: the mutual-defection payoff, i.e.
+  # what they can guarantee by refusing to cooperate at all. With tau at the
+  # security level each constraint is exactly the individual-rationality
+  # condition from cooperative game theory, "self-sacrifice" is the
+  # well-defined event R_s < tau_s, and "exploitation" is R_o < tau_o. That is
+  # the interpretable default and what the paper should report.
+  #
+  # Raise one (e.g. -17.5) only to ask the separate question "how much better
+  # than its security level can this player be made to do", and say so.
+  #
+  # Per-constraint overrides are allowed, e.g. a slower dual on the co-player:
+  #   - player: co-player
+  #     tau: -20.0
+  #     ki: 0.002
+  #     window: 0
+  constraints:
+    - player: shaper
+      tau: -20.0
+    - player: co-player
+      tau: -20.0
 
   # ---- ablation switch ----
   #
-  # True freezes lam at lam_init, giving the STATIC weighted-welfare ablation
-  # r_mix = (1 + lam_init) * r_s + r_o. Worth running: a reviewer will ask
-  # whether a tuned constant weight does the same job. The argument for the
-  # constrained formulation is that a fixed weight either sacrifices or
-  # exploits depending on the game, while adaptive lam lands on the boundary
+  # True freezes every lam at its lam_init, giving the STATIC weighted-welfare
+  # ablation r_mix = (1 + lam_s) r_s + (1 + lam_o) r_o. Worth running: a
+  # reviewer will ask whether tuned constant weights do the same job. The
+  # argument for the constrained formulation is that fixed weights sacrifice
+  # or exploit depending on the game, while adaptive lam lands on the boundary
   # in both -- which requires actually running this.
   freeze_lam: False
 
 # COALA-PG shaper (agent1). Unchanged from coala_pg_v_tabular.yaml except that
-# the network carries a second value head (welfare, own-return).
+# the network carries one value head per return (welfare + 2 constraints).
 ppo1:
   num_minibatches: 2
   num_epochs: 4

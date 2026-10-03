@@ -80,6 +80,7 @@ import distrax
 import haiku as hk
 import jax
 import jax.numpy as jnp
+import omegaconf
 import optax
 
 from pax import utils
@@ -202,23 +203,25 @@ def make_coala_ipd_network(num_actions: int, hidden_size: int = 32):
     return network, hidden_state
 
 
-class ZeroInitDualValueHead(hk.Module):
-    """Policy readout plus TWO value readouts, stacked on the last axis.
+class ZeroInitMultiValueHead(hk.Module):
+    """Policy readout plus ``num_value_heads`` value readouts, stacked last.
 
-    Head 0 estimates the WELFARE return, head 1 the shaper's own (constraint)
-    return. The Lagrangian baseline is ``V_W + lam * V_c``.
+    Head 0 estimates the WELFARE return; heads 1..K estimate the K constraint
+    returns. The Lagrangian baseline is ``V_W + sum_k lam_k * V_k``.
 
-    Why two heads rather than one critic trained on the composite return
-    ``r_W + lam * r_c``: lam moves after every meta-trajectory, so a composite
-    critic is stale by exactly the amount lam just changed, and it is most
-    stale precisely when the constraint starts binding (when lam is moving
-    fastest). Fitting the two returns separately and combining them with the
-    current lam keeps the baseline unbiased for any lam.
+    Why separate heads rather than one critic trained on the composite return
+    ``r_W + sum_k lam_k * r_k``: the multipliers move after every
+    meta-trajectory, so a composite critic is stale by exactly the amount they
+    just changed, and it is most stale precisely when a constraint starts
+    binding (when its multiplier is moving fastest). Fitting each return
+    separately and combining them with the current multipliers keeps the
+    baseline unbiased for any lam.
     """
 
-    def __init__(self, num_actions: int):
-        super().__init__(name="zero_init_dual_value_head")
+    def __init__(self, num_actions: int, num_value_heads: int = 2):
+        super().__init__(name="zero_init_multi_value_head")
         self._num_actions = num_actions
+        self._num_value_heads = num_value_heads
 
     def __call__(self, inputs: jnp.ndarray):
         logits = hk.Linear(
@@ -227,32 +230,35 @@ class ZeroInitDualValueHead(hk.Module):
             b_init=hk.initializers.Constant(0),
             name="policy_logits",
         )(inputs)
-        value_welfare = hk.Linear(
-            1,
-            w_init=hk.initializers.Constant(0),
-            b_init=hk.initializers.Constant(0),
-            name="value_welfare",
-        )(inputs)
-        value_cost = hk.Linear(
-            1,
-            w_init=hk.initializers.Constant(0),
-            b_init=hk.initializers.Constant(0),
-            name="value_cost",
-        )(inputs)
-        values = jnp.concatenate([value_welfare, value_cost], axis=-1)
+        # Named so a checkpoint is readable: head 0 is welfare, the rest are
+        # the constraints in the order the runner stacks them.
+        head_names = ["value_welfare"] + [
+            f"value_constraint_{k}" for k in range(self._num_value_heads - 1)
+        ]
+        heads = [
+            hk.Linear(
+                1,
+                w_init=hk.initializers.Constant(0),
+                b_init=hk.initializers.Constant(0),
+                name=name,
+            )(inputs)
+            for name in head_names
+        ]
+        values = jnp.concatenate(heads, axis=-1)
         return distrax.Categorical(logits=logits), values
 
 
-def make_coala_ipd_dual_value_network(
-    num_actions: int, hidden_size: int = 32
+def make_coala_ipd_multi_value_network(
+    num_actions: int, hidden_size: int = 32, num_value_heads: int = 2
 ):
-    """`make_coala_ipd_network` with a two-headed critic (welfare, own-return).
+    """`make_coala_ipd_network` with a multi-headed critic.
 
-    The torso is identical to the stock COALA-PG network, so the only
-    difference between the Lagrangian agent and the baseline is the extra value
-    readout and how the advantage is combined -- which is what lets the
-    three-way comparison (selfish / welfare / constrained) be attributed to the
-    objective rather than to the architecture.
+    Head 0 is welfare; the remaining ``num_value_heads - 1`` heads are the
+    constraint returns. The torso is identical to the stock COALA-PG network,
+    so the only difference between the Lagrangian agent and the baseline is the
+    extra value readouts and how the advantage is combined -- which is what
+    lets the three-way comparison (selfish / welfare / constrained) be
+    attributed to the objective rather than to the architecture.
     """
     hidden_state = jnp.zeros((1, hidden_size))
 
@@ -260,7 +266,9 @@ def make_coala_ipd_dual_value_network(
         observations: jnp.ndarray, state: jnp.ndarray
     ) -> Tuple[Tuple[distrax.Categorical, jnp.ndarray], jnp.ndarray]:
         embedding, state = CoalaIpdTorso(width=hidden_size)(observations, state)
-        dist, values = ZeroInitDualValueHead(num_actions)(embedding)
+        dist, values = ZeroInitMultiValueHead(
+            num_actions, num_value_heads
+        )(embedding)
         return (dist, values), state
 
     network = hk.without_apply_rng(hk.transform(forward_fn))
@@ -799,8 +807,8 @@ class LagrangianBatch(NamedTuple):
     """A batch of data; all shapes are expected to be [B, ...].
 
     Differs from `Batch` in that `target_values` and `behavior_values` carry
-    both critic heads on a trailing axis of size 2, while `advantages` is
-    already the lam-combined scalar.
+    every critic head on a trailing axis of size ``1 + num_constraints``
+    (welfare first), while `advantages` is already the lam-combined scalar.
     """
 
     observations: jnp.ndarray
@@ -815,31 +823,47 @@ class LagrangianBatch(NamedTuple):
 class CoalaPGLagrangian(AgentInterface):
     """COALA-PG on the Lagrangian of a constrained welfare problem.
 
-        max_theta  W(theta)   s.t.   R_s(theta) >= tau
+    Supports K individual-rationality constraints, one per player:
 
-    with Lagrangian ``L = W + lam * (R_s - tau)``. Both terms are expectations
-    over the SAME trajectories, so the Lagrangian gradient is just the COALA-PG
-    gradient of a reshaped reward,
+        max_theta  W(theta)
+        s.t.       R_s(theta) >= tau_s        (the shaper)
+                   R_o(theta) >= tau_o        (the co-player)
 
-        r_mix = (r_s + r_o) + lam * r_s = (1 + lam) * r_s + r_o,
+    with Lagrangian
+
+        L = W + lam_s * (R_s - tau_s) + lam_o * (R_o - tau_o).
+
+    Every term is an expectation over the SAME trajectories, so the Lagrangian
+    gradient is just the COALA-PG gradient of a reshaped reward,
+
+        r_mix = (r_s + r_o) + lam_s * r_s + lam_o * r_o
+              = (1 + lam_s) * r_s + (1 + lam_o) * r_o,
 
     and the learning-aware estimator (`coala_advantages`, Algorithm 1) needs no
     modification whatsoever. That is the whole point: the comparison against
     the selfish and plain-welfare objectives isolates the objective, because
     the estimator, rollout structure and co-player are untouched.
 
+    Note the two multipliers do different jobs, which is why one is not enough:
+    ``lam_s`` pulls the shaper back from self-sacrifice, while ``lam_o``
+    protects the co-player from being exploited. With only ``lam_s``, the
+    welfare term is the co-player's sole defence, and welfare is indifferent
+    between (-10, -30) and (-30, -10).
+
     Rather than reshaping the reward and running one critic, this class keeps
-    the two return streams separate and exploits the fact that Algorithm 1 is
-    LINEAR in (rewards, values):
+    the streams separate and exploits the fact that Algorithm 1 is LINEAR in
+    (rewards, values):
 
-        adv(r_W + lam*r_c, V_W + lam*V_c) == adv(r_W, V_W) + lam*adv(r_c, V_c)
+        adv(r_W + sum_k lam_k r_k, V_W + sum_k lam_k V_k)
+            == adv(r_W, V_W) + sum_k lam_k * adv(r_k, V_k)
 
-    so combining two per-stream advantages is algebraically identical to
+    so combining per-stream advantages is algebraically identical to
     reshaping, while letting each critic head fit its own return. A single
-    critic on the composite return would be biased by exactly the amount lam
-    last moved -- worst precisely when the constraint begins to bind.
+    critic on the composite return would be biased by exactly the amount the
+    multipliers last moved -- worst precisely when a constraint begins to bind.
 
-    `update` therefore takes an extra argument, the current ``lam``.
+    `update` therefore takes an extra argument: ``lam``, a vector of length
+    ``num_constraints`` in the same order the runner stacks the streams.
     """
 
     def __init__(
@@ -866,14 +890,19 @@ class CoalaPGLagrangian(AgentInterface):
         gae_lambda: float = 0.95,
         advantage_normalization: bool = True,
         reward_rescaling: float = 1.0,
+        num_constraints: int = 2,
         player_id: int = 0,
     ):
+        # Head 0 is welfare, heads 1..K the constraints.
+        num_value_heads = 1 + num_constraints
+
         @jax.jit
         def policy(
             state: TrainingState, observation: jnp.ndarray, mem: MemoryState
         ):
             key, subkey = jax.random.split(state.random_key)
-            # `values` is [..., 2]: (welfare head, constraint head).
+            # `values` is [..., 1 + num_constraints]:
+            # (welfare head, constraint heads...).
             (dist, values), hidden_state = network.apply(
                 state.params, observation, mem.hidden
             )
@@ -932,7 +961,7 @@ class CoalaPGLagrangian(AgentInterface):
             # same gradient magnitude it would get as a lone critic.
             value_loss = jnp.sum(jnp.mean(per_head_loss, axis=0))
             value_loss_welfare = jnp.mean(per_head_loss[..., 0])
-            value_loss_cost = jnp.mean(per_head_loss[..., 1])
+            value_loss_cost = jnp.mean(per_head_loss[..., 1:])
 
             if anneal_entropy:
                 fraction = jnp.fmax(1 - timesteps / entropy_coeff_horizon, 0)
@@ -967,14 +996,18 @@ class CoalaPGLagrangian(AgentInterface):
 
             `sample` is time-major with the co-player batch intact,
             ``[L, num_opps, num_envs, ...]`` where ``L = M * T``, and carries
-            TWO reward streams:
+            TWO reward tensors:
 
-              * ``rewards``      -- the welfare stream r_s + r_o
-              * ``cost_rewards`` -- the constraint stream (the shaper's own
-                reward, already masked to the constraint window and rescaled
-                by the runner)
+              * ``rewards``      -- the welfare stream r_s + r_o, shape
+                ``[L, num_opps, num_envs]``
+              * ``cost_rewards`` -- the K constraint streams stacked on a
+                trailing axis, ``[L, num_opps, num_envs, K]``. The runner has
+                already masked each to its constraint window and rescaled it.
 
-            ``behavior_values`` is ``[L, num_opps, num_envs, 2]``.
+            ``behavior_values`` is ``[L, num_opps, num_envs, 1 + K]``, head 0
+            welfare and heads 1..K matching ``cost_rewards``' last axis.
+
+            ``lam`` is ``[K]``, in that same order.
             """
             observations = sample.observations
             actions = sample.actions
@@ -989,22 +1022,17 @@ class CoalaPGLagrangian(AgentInterface):
             n_opps = rewards_w.shape[1]
             n_envs = rewards_w.shape[2]
 
-            # Both streams share one rescaling so their ratio -- and therefore
-            # the meaning of lam -- is unaffected by it.
+            # All streams share one rescaling so their ratios -- and therefore
+            # the meaning of lam -- are unaffected by it.
             learning_rewards_w = rewards_w * reward_rescaling
             learning_rewards_c = rewards_c * reward_rescaling
 
             # -> [num_opps, num_envs, L] for Algorithm 1.
             to_alg = lambda x: jnp.transpose(x, (1, 2, 0))
             r_w_a = to_alg(learning_rewards_w)
-            r_c_a = to_alg(learning_rewards_c)
             d_a = to_alg(dones)
-            # Split the heads: [L, opps, envs, 2] -> two [opps, envs, L].
             v_w_a = to_alg(behavior_values[..., 0])
-            v_c_a = to_alg(behavior_values[..., 1])
-
             boot_w = v_w_a[:, :, -1] * (1.0 - d_a[:, :, -1])
-            boot_c = v_c_a[:, :, -1] * (1.0 - d_a[:, :, -1])
 
             adv_fn = jax.vmap(
                 coala_advantages, in_axes=(0, 0, 0, 0, None, None, None)
@@ -1013,35 +1041,41 @@ class CoalaPGLagrangian(AgentInterface):
                 coala_value_targets, in_axes=(0, 0, 0, None, None, None)
             )
 
+            def _streams(r_a, v_a):
+                boot = v_a[:, :, -1] * (1.0 - d_a[:, :, -1])
+                adv = adv_fn(
+                    r_a, v_a, d_a, boot, gamma, gae_lambda, num_inner_steps
+                )
+                tgt = jax.lax.stop_gradient(
+                    tgt_fn(r_a, v_a, boot, gamma, gae_lambda, num_inner_steps)
+                )
+                return adv, tgt
+
             # Algorithm 1 run once per stream. Because it is LINEAR in
-            # (rewards, values), adv_w + lam * adv_c is exactly the advantage
-            # of the reshaped reward r_W + lam * r_c under the combined
-            # baseline V_W + lam * V_c -- no approximation, and no change to
-            # the learning-aware estimator itself.
-            adv_w = adv_fn(
-                r_w_a, v_w_a, d_a, boot_w, gamma, gae_lambda, num_inner_steps
-            )
-            adv_c = adv_fn(
-                r_c_a, v_c_a, d_a, boot_c, gamma, gae_lambda, num_inner_steps
-            )
-            adv_a = adv_w + lam * adv_c
+            # (rewards, values), adv_w + sum_k lam_k * adv_k is exactly the
+            # advantage of the reshaped reward r_W + sum_k lam_k * r_k under
+            # the combined baseline V_W + sum_k lam_k * V_k -- no
+            # approximation, and no change to the estimator itself.
+            adv_w, tgt_w = _streams(r_w_a, v_w_a)
 
-            tgt_w = jax.lax.stop_gradient(
-                tgt_fn(
-                    r_w_a, v_w_a, boot_w, gamma, gae_lambda, num_inner_steps
-                )
-            )
-            tgt_c = jax.lax.stop_gradient(
-                tgt_fn(
-                    r_c_a, v_c_a, boot_c, gamma, gae_lambda, num_inner_steps
-                )
-            )
+            lam_vec = jnp.reshape(jnp.asarray(lam), (num_constraints,))
+            adv_a = adv_w
+            adv_c_list = []
+            tgt_c_list = []
+            for k in range(num_constraints):
+                r_k_a = to_alg(learning_rewards_c[..., k])
+                v_k_a = to_alg(behavior_values[..., 1 + k])
+                adv_k, tgt_k = _streams(r_k_a, v_k_a)
+                adv_a = adv_a + lam_vec[k] * adv_k
+                adv_c_list.append(adv_k)
+                tgt_c_list.append(tgt_k)
 
-            # Back to time-major, then stack the heads on the last axis.
+            # Back to time-major, then stack the heads on the last axis in the
+            # same order the network emits them.
             from_alg = lambda x: jnp.transpose(x, (2, 0, 1))
             advantages = from_alg(adv_a)
             target_values = jnp.stack(
-                [from_alg(tgt_w), from_alg(tgt_c)], axis=-1
+                [from_alg(tgt_w)] + [from_alg(x) for x in tgt_c_list], axis=-1
             )
 
             trajectories = LagrangianBatch(
@@ -1133,16 +1167,20 @@ class CoalaPGLagrangian(AgentInterface):
             metrics["rewards_std"] = jnp.std(rewards_w)
             metrics["coala/advantage_mean"] = jnp.mean(advantages)
             metrics["coala/advantage_std"] = jnp.std(advantages)
-            # The two advantage streams separately: if the welfare term
-            # dominates by orders of magnitude, the constraint cannot bite
-            # whatever lam says.
+            # Each advantage stream separately: if the welfare term dominates
+            # by orders of magnitude, no constraint can bite whatever lam says.
             metrics["coala/advantage_welfare_std"] = jnp.std(adv_w)
-            metrics["coala/advantage_cost_std"] = jnp.std(adv_c)
             metrics["coala/target_value_welfare_mean"] = jnp.mean(tgt_w)
-            metrics["coala/target_value_cost_mean"] = jnp.mean(tgt_c)
+            for k in range(num_constraints):
+                metrics[f"coala/advantage_cost{k}_std"] = jnp.std(
+                    adv_c_list[k]
+                )
+                metrics[f"coala/target_value_cost{k}_mean"] = jnp.mean(
+                    tgt_c_list[k]
+                )
+                metrics[f"lagrangian/lam{k}_used"] = lam_vec[k]
             metrics["coala/reward_rescaling"] = jnp.asarray(reward_rescaling)
             metrics["coala/policy_batch_scale"] = jnp.asarray(n_envs)
-            metrics["lagrangian/lam_used"] = jnp.asarray(lam)
 
             new_state = TrainingState(
                 params=params,
@@ -1175,8 +1213,8 @@ class CoalaPGLagrangian(AgentInterface):
             ), MemoryState(
                 hidden=jnp.zeros((num_envs, initial_hidden_state.shape[-1])),
                 extras={
-                    # Two critic heads, hence the trailing 2.
-                    "values": jnp.zeros((num_envs, 2)),
+                    # One critic head per return: welfare + K constraints.
+                    "values": jnp.zeros((num_envs, num_value_heads)),
                     "log_probs": jnp.zeros(num_envs),
                 },
             )
@@ -1210,12 +1248,14 @@ class CoalaPGLagrangian(AgentInterface):
         self._num_epochs = num_epochs
         self._num_inner_steps = num_inner_steps
         self._gru_dim = gru_dim
+        self._num_constraints = num_constraints
+        self._num_value_heads = num_value_heads
 
     def reset_memory(self, memory, eval=False) -> MemoryState:
         num_envs = 1 if eval else self._num_envs
         memory = memory._replace(
             extras={
-                "values": jnp.zeros((num_envs, 2)),
+                "values": jnp.zeros((num_envs, self._num_value_heads)),
                 "log_probs": jnp.zeros(num_envs),
             },
             hidden=jnp.zeros((num_envs, self._gru_dim)),
@@ -1228,13 +1268,16 @@ class CoalaPGLagrangian(AgentInterface):
         obs: jnp.ndarray,
         state: TrainingState,
         mem: MemoryState,
-        lam: jnp.ndarray = 0.0,
+        lam: jnp.ndarray = None,
     ):
         """Update at the end of a full meta-trajectory.
 
-        `lam` is the current Lagrange multiplier, supplied by the runner's
-        controller. `mem` is returned unchanged -- see the note in `sgd_step`.
+        `lam` is the vector of current Lagrange multipliers (one per
+        constraint), supplied by the runner's controllers. `mem` is returned
+        unchanged -- see the note in `sgd_step`.
         """
+        if lam is None:
+            lam = jnp.zeros((self._num_constraints,))
         state, metrics = self._sgd_step(state, traj_batch, lam)
         self._logger.metrics["sgd_steps"] += (
             self._num_minibatches * self._num_epochs
@@ -1560,18 +1603,36 @@ def make_coala_pg_lagrangian_agent(
     num_iterations: int,
     player_id: int,
 ):
-    """Build a Lagrangian COALA-PG shaper (two critic heads).
+    """Build a Lagrangian COALA-PG shaper (one critic head per return).
 
     Identical to `make_coala_pg_agent` except for the network: the torso is the
-    same, with a second value readout for the constraint return.
+    same, with one extra value readout per constraint.
+
+    The number of constraints comes from ``args.welfare.constraints`` (the list
+    the runner also reads), defaulting to 2 -- the shaper's and the co-player's
+    individual-rationality conditions.
     """
+    welfare_args = omegaconf.OmegaConf.select(args, "welfare", default=None)
+    if welfare_args is not None and "constraints" in welfare_args:
+        num_constraints = len(welfare_args.constraints)
+    else:
+        num_constraints = 2
+    if num_constraints < 1:
+        raise ValueError(
+            "Lagrangian COALA-PG needs at least one constraint; got "
+            f"{num_constraints}. Use agent1='CoalaPG' with "
+            "coala_objective='welfare' for the unconstrained objective."
+        )
+
     if args.env_id in (
         "iterated_matrix_game",
         "iterated_tensor_game",
         "iterated_nplayer_tensor_game",
     ):
-        network, initial_hidden_state = make_coala_ipd_dual_value_network(
-            action_spec, agent_args.hidden_size
+        network, initial_hidden_state = make_coala_ipd_multi_value_network(
+            action_spec,
+            agent_args.hidden_size,
+            num_value_heads=1 + num_constraints,
         )
     else:
         raise NotImplementedError(
@@ -1626,6 +1687,7 @@ def make_coala_pg_lagrangian_agent(
         gae_lambda=agent_args.gae_lambda,
         advantage_normalization=agent_args.get("advantage_normalization", True),
         reward_rescaling=agent_args.get("reward_rescaling", 1.0),
+        num_constraints=num_constraints,
         player_id=player_id,
     )
 

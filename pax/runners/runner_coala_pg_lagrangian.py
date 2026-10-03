@@ -1,50 +1,64 @@
 """Runner for COALA-PG on a constrained-welfare Lagrangian.
 
-Solves
+Solves the constrained welfare problem with one individual-rationality
+constraint per player -- the same two constraints as
+`runner_welfare_evo` (there: ``mu1``/``mu2`` against
+``v_ref_shaper``/``v_ref_opponent``):
 
-    max_theta  W(theta)        s.t.   R_s(theta) >= tau
+    max_theta  W(theta)
+    s.t.       R_s(theta) >= tau_s        (the shaper)
+               R_o(theta) >= tau_o        (the co-player)
 
-where ``W = R_s + R_o`` is welfare over the meta-episode and ``R_s`` is the
-shaper's own return. Because the constraint is itself an expected return, the
-Lagrangian
+with Lagrangian
 
-    L(theta, lam) = W(theta) + lam * (R_s(theta) - tau)
+    L(theta, lam) = W + lam_s * (R_s - tau_s) + lam_o * (R_o - tau_o).
 
-has both terms as expectations over the *same* trajectories, so its gradient is
-just the COALA-PG gradient of a reshaped reward:
+Because each constraint is itself an expected return, every term is an
+expectation over the SAME trajectories, so the Lagrangian gradient is just the
+COALA-PG gradient of a reshaped reward:
 
-    r_mix = (r_s + r_o) + lam * r_s = (1 + lam) * r_s + r_o.
+    r_mix = (r_s + r_o) + lam_s * r_s + lam_o * r_o
+          = (1 + lam_s) * r_s + (1 + lam_o) * r_o.
 
 Nothing in the learning-aware estimator changes. Relative to
 `runner_coala_pg.CoalaPGRunner`, exactly three things differ:
 
-  1. the trajectory carries two reward streams (welfare and constraint),
-  2. the baseline comes from two critic heads combined as V_W + lam * V_c,
-  3. a lam controller runs after each meta-trajectory.
+  1. the trajectory carries a welfare stream plus one stream per constraint,
+  2. the baseline comes from one critic head per return, combined as
+     ``V_W + sum_k lam_k * V_k``,
+  3. one lam controller per constraint runs after each meta-trajectory.
 
 The rollout structure, the co-player, and `coala_advantages` are untouched,
 which is what lets a selfish / welfare / constrained comparison be attributed
-to the objective rather than to the optimizer or the architecture.
+to the objective rather than to the optimizer.
+
+WHY TWO MULTIPLIERS AND NOT ONE. They do different jobs. ``lam_s`` pulls the
+shaper back from self-sacrifice; ``lam_o`` protects the co-player from being
+exploited. With only ``lam_s``, the co-player's sole defence is the welfare
+term, and welfare is indifferent between (-10, -30) and (-30, -10) -- so the
+"cooperation" the shaper converges to can be an exploitative split that happens
+to sum well. Both constraints together are what make the claim "cooperation is
+established in the asymmetric setting" mean individual rationality for BOTH
+players.
 
 Reference for the dual update: Stooke, Achiam & Abbeel, "Responsive Safety in
-Reinforcement Learning by PID Lagrangian Methods", ICML 2020. Setting
-``welfare.kp = welfare.kd = 0`` recovers RCPO (Tessler et al., 2019) dual
-ascent exactly, so the dual-ascent baseline needs no separate runner.
+Reinforcement Learning by PID Lagrangian Methods", ICML 2020. Setting a
+constraint's ``kp = kd = 0`` recovers RCPO (Tessler et al., 2019) dual ascent
+exactly, so the dual-ascent baseline needs no separate runner.
 
 Two modelling choices that matter more than the controller gains:
 
-  * THE CONSTRAINT WINDOW. A floor on the shaper's average return over the
-    whole meta-episode can be satisfied by exploiting the co-player early and
-    being exploited late, after it has converged -- the opposite of "shaping
-    established cooperation". `welfare.constraint_window` restricts the
-    constraint to the last K inner episodes, making tau a statement about
-    where the co-player ends up.
-  * THE SCALE OF tau. The constraint return is normalised to a PER-INNER-
-    EPISODE scale, so tau can be read straight off the payoff matrix (e.g. the
-    mutual-defection payoff, which makes the constraint exactly the
+  * THE CONSTRAINT WINDOW. A floor on a player's average return over the whole
+    meta-episode can be satisfied early and violated late, after the co-player
+    has converged -- the opposite of "shaping established cooperation".
+    ``window`` restricts a constraint to the last K inner episodes, making tau
+    a statement about where the co-player ENDS UP.
+  * THE SCALE OF tau. Constraint returns are normalised to a PER-INNER-EPISODE
+    scale, so tau can be read straight off the payoff matrix (e.g. the
+    mutual-defection payoff, which makes each constraint exactly the
     individual-rationality condition and "self-sacrifice" the well-defined
-    event R_s < tau). If the ES/Shaper runs define their floor on total
-    meta-episode return instead, rescale one of them so the constraint means
+    event R < tau). If the ES/Shaper runs define their floor on total
+    meta-episode return instead, rescale one of them so the constraints mean
     the same thing on both optimizers.
 """
 
@@ -63,13 +77,16 @@ from pax.watchers import cg_visitation, ipd_visitation
 
 MAX_WANDB_CALLS = 1000
 
+# Which player's reward stream each constraint is written on.
+PLAYER_TO_INDEX = {"shaper": 0, "co-player": 1, "opponent": 1}
+
 
 class Sample(NamedTuple):
     """A batch of data.
 
-    `rewards` is the welfare stream; `cost_rewards` is the constraint stream
-    (the shaper's own reward, masked to the constraint window and rescaled).
-    `behavior_values` carries both critic heads on a trailing axis of size 2.
+    `rewards` is the welfare stream. `cost_rewards` holds the K constraint
+    streams on a trailing axis (each already masked to its window and
+    rescaled). `behavior_values` carries ``1 + K`` critic heads, welfare first.
     """
 
     observations: jnp.ndarray
@@ -97,7 +114,7 @@ def to_long_trajectory(traj: Sample) -> Sample:
 def constraint_window_mask(
     num_outer_steps: int, window: int, dtype=jnp.float32
 ) -> jnp.ndarray:
-    """Weights over the M inner episodes selecting the constraint window.
+    """Weights over the M inner episodes selecting one constraint's window.
 
     Returns ``[M]``, zero outside the last ``window`` episodes and
     ``M / window`` inside it. The scale is chosen so that
@@ -105,15 +122,77 @@ def constraint_window_mask(
         sum_m mask[m] * ep_return[m] / M  ==  mean of ep_return over the window
 
     i.e. the constraint stream integrates to the windowed per-episode mean
-    multiplied by M -- the same scale as the unwindowed self-return. With
-    ``window >= M`` the mask is all ones and the reward stream is exactly
-    ``r_s``, so ``r_mix = (1 + lam) * r_s + r_o`` with no hidden factor.
+    multiplied by M -- the same scale as the unwindowed return. With
+    ``window >= M`` the mask is all ones and the stream is exactly the raw
+    reward, so ``r_mix = (1 + lam_s) r_s + (1 + lam_o) r_o`` with no hidden
+    factor.
     """
     if window <= 0 or window >= num_outer_steps:
         return jnp.ones((num_outer_steps,), dtype=dtype)
     idx = jnp.arange(num_outer_steps)
     inside = idx >= (num_outer_steps - window)
     return jnp.where(inside, num_outer_steps / float(window), 0.0).astype(dtype)
+
+
+def _parse_constraints(welfare_args, num_outer_steps):
+    """Read ``welfare.constraints`` into plain dicts, applying the defaults.
+
+    Each entry needs a ``player`` ("shaper" or "co-player") and a ``tau``;
+    everything else falls back to the top-level ``welfare`` value, so shared
+    PID gains need writing only once.
+    """
+    if "constraints" not in welfare_args:
+        raise ValueError(
+            "runner=coala_pg_lagrangian requires a `welfare.constraints` list "
+            "(one entry per individual-rationality constraint). See "
+            "pax/conf/experiment/ipd/lagrangian_coala_pg_v_tabular.yaml."
+        )
+    shared = {
+        "kp": float(welfare_args.get("kp", 0.0)),
+        "ki": float(welfare_args.get("ki", 0.01)),
+        "kd": float(welfare_args.get("kd", 0.0)),
+        "lam_init": float(welfare_args.get("lam_init", 0.5)),
+        "lam_max": welfare_args.get("lam_max", None),
+        "ema_beta": float(welfare_args.get("ema_beta", 0.0)),
+        "window": int(welfare_args.get("constraint_window", 0)),
+    }
+    parsed = []
+    for i, entry in enumerate(welfare_args.constraints):
+        if "player" not in entry or "tau" not in entry:
+            raise ValueError(
+                f"welfare.constraints[{i}] needs both `player` and `tau`; "
+                f"got keys {list(entry.keys())}."
+            )
+        player = str(entry.player)
+        if player not in PLAYER_TO_INDEX:
+            raise ValueError(
+                f"welfare.constraints[{i}].player must be one of "
+                f"{sorted(PLAYER_TO_INDEX)}; got '{player}'."
+            )
+        cfg = dict(shared)
+        for key in list(shared.keys()) + ["tau"]:
+            if key in entry:
+                cfg[key] = entry[key]
+        lam_max = cfg["lam_max"]
+        parsed.append(
+            {
+                "name": player,
+                "player_index": PLAYER_TO_INDEX[player],
+                "tau": float(cfg["tau"]),
+                "kp": float(cfg["kp"]),
+                "ki": float(cfg["ki"]),
+                "kd": float(cfg["kd"]),
+                "lam_init": float(cfg["lam_init"]),
+                "lam_max": (
+                    None
+                    if lam_max in (None, "null", "")
+                    else float(lam_max)
+                ),
+                "ema_beta": float(cfg["ema_beta"]),
+                "window": int(cfg["window"]),
+            }
+        )
+    return parsed
 
 
 class CoalaPGLagrangianRunner:
@@ -131,28 +210,41 @@ class CoalaPGLagrangianRunner:
         self.ipd_stats = jax.jit(ipd_visitation)
         self.cg_stats = jax.jit(cg_visitation)
 
-        w = args.welfare
-        self.tau = float(w.tau)
-        self.constraint_window = int(w.get("constraint_window", 0))
-        self.controller = PIDLagrangian(
-            tau=self.tau,
-            kp=float(w.get("kp", 0.0)),
-            ki=float(w.get("ki", 0.01)),
-            kd=float(w.get("kd", 0.0)),
-            lam_init=float(w.get("lam_init", 0.5)),
-            lam_max=(
-                None
-                if w.get("lam_max", None) in (None, "null", "")
-                else float(w.get("lam_max"))
-            ),
-            ema_beta=float(w.get("ema_beta", 0.0)),
+        num_outer_steps = args.num_outer_steps
+        self.constraints = _parse_constraints(args.welfare, num_outer_steps)
+        self.num_constraints = len(self.constraints)
+        self.controllers = [
+            PIDLagrangian(
+                tau=c["tau"],
+                kp=c["kp"],
+                ki=c["ki"],
+                kd=c["kd"],
+                lam_init=c["lam_init"],
+                lam_max=c["lam_max"],
+                ema_beta=c["ema_beta"],
+            )
+            for c in self.constraints
+        ]
+        # Fixed multipliers turn this into the static weighted-welfare
+        # ablation: r_mix = (1+lam_s) r_s + (1+lam_o) r_o with lam never
+        # updated. Worth running, because a reviewer will ask whether fixed
+        # weights do the same job.
+        self.freeze_lam = bool(args.welfare.get("freeze_lam", False))
+        self.lam = jnp.asarray(
+            [c.lam for c in self.controllers], dtype=jnp.float32
         )
-        # A fixed multiplier turns this into the static weighted-welfare
-        # ablation: r_mix = (1 + lam) * r_s + r_o with lam never updated. Worth
-        # running, because a reviewer will ask whether an adaptive multiplier
-        # beats a tuned constant.
-        self.freeze_lam = bool(w.get("freeze_lam", False))
-        self.lam = self.controller.lam
+
+        # [K, M] -- one window mask per constraint.
+        window_masks = jnp.stack(
+            [
+                constraint_window_mask(num_outer_steps, c["window"])
+                for c in self.constraints
+            ],
+            axis=0,
+        )
+        self._window_masks = window_masks
+        # Which reward stream each constraint reads.
+        player_index = tuple(c["player_index"] for c in self.constraints)
 
         # ---- VMAP env over num_envs, then num_opps ----
         env.batch_reset = jax.vmap(env.reset, (0, None), 0)
@@ -163,11 +255,7 @@ class CoalaPGLagrangianRunner:
         self.split = jax.vmap(jax.vmap(jax.random.split, (0, None)), (0, None))
 
         agent1, agent2 = agents
-        num_outer_steps = args.num_outer_steps
-        window_mask = constraint_window_mask(
-            num_outer_steps, self.constraint_window
-        )
-        self._window_mask = window_mask
+        num_constraints = self.num_constraints
 
         # ---- agent 1 (Lagrangian COALA-PG shaper): batched over num_opps ----
         agent1.batch_init = jax.vmap(
@@ -212,8 +300,8 @@ class CoalaPGLagrangianRunner:
                 a1_mem,
                 a2_state,
                 a2_mem,
-                env_state,
                 env_params,
+                env_state,
             ) = carry
 
             rngs = self.split(rngs, 4)
@@ -230,13 +318,16 @@ class CoalaPGLagrangianRunner:
                 env.batch_step(env_rng, env_state, (a1, a2), env_params)
             )
 
-            # Welfare stream now; the constraint stream needs the episode index
-            # for window masking, so it is built in `_outer_rollout`.
+            # The K constraint streams, before window masking: constraint k
+            # reads player `player_index[k]`'s reward.
+            cost = jnp.stack(
+                [rewards[idx] for idx in player_index], axis=-1
+            )
             traj1 = Sample(
                 obs1,
                 a1,
                 rewards[0] + rewards[1],
-                rewards[0],
+                cost,
                 new_a1_mem.extras["log_probs"],
                 new_a1_mem.extras["values"],
                 done,
@@ -246,13 +337,12 @@ class CoalaPGLagrangianRunner:
                 obs2,
                 a2,
                 rewards[1],
-                rewards[1],
+                cost,
                 new_a2_mem.extras["log_probs"],
                 new_a2_mem.extras["values"],
                 done,
                 a2_mem.hidden,
             )
-            # Keep the raw per-player rewards for logging and the controller.
             return (
                 rngs,
                 next_obs1,
@@ -263,8 +353,8 @@ class CoalaPGLagrangianRunner:
                 new_a1_mem,
                 a2_state,
                 new_a2_mem,
-                env_state,
                 env_params,
+                env_state,
             ), (traj1, traj2, rewards[0], rewards[1])
 
         def _outer_rollout(carry, unused):
@@ -282,8 +372,8 @@ class CoalaPGLagrangianRunner:
                 a1_mem,
                 a2_state,
                 a2_mem,
-                env_state,
                 env_params,
+                env_state,
             ) = vals
 
             # Co-player learns from its minibatch of all num_envs trajectories.
@@ -303,8 +393,8 @@ class CoalaPGLagrangianRunner:
                 a1_mem,
                 a2_state,
                 a2_mem,
-                env_state,
                 env_params,
+                env_state,
             ), (traj1, traj2, a2_metrics, raw_r1, raw_r2)
 
         def _rollout(
@@ -341,8 +431,8 @@ class CoalaPGLagrangianRunner:
                     _a1_mem,
                     _a2_state,
                     _a2_mem,
-                    env_state,
                     _env_params,
+                    env_state,
                 ),
                 None,
                 length=num_outer_steps,
@@ -357,26 +447,34 @@ class CoalaPGLagrangianRunner:
                 a1_mem,
                 a2_state,
                 a2_mem,
-                env_state,
                 _env_params,
+                env_state,
             ) = vals
             traj_1, traj_2, a2_metrics, raw_r1, raw_r2 = stack
 
             # Per-episode returns: [M, T, num_opps, num_envs] -> [M]
             ep_rewards_1 = raw_r1.sum(axis=1).mean(axis=(1, 2))
             ep_rewards_2 = raw_r2.sum(axis=1).mean(axis=(1, 2))
+            ep_rewards = jnp.stack([ep_rewards_1, ep_rewards_2], axis=0)
 
-            # Apply the constraint window to the cost stream. window_mask is
-            # [M]; the stream is [M, T, num_opps, num_envs].
-            mask = window_mask.reshape((num_outer_steps, 1, 1, 1))
+            # Apply each constraint's window to its own stream.
+            # window_masks is [K, M]; cost_rewards is [M, T, opps, envs, K].
+            mask = jnp.transpose(window_masks, (1, 0)).reshape(
+                (num_outer_steps, 1, 1, 1, num_constraints)
+            )
             traj_1 = traj_1._replace(cost_rewards=traj_1.cost_rewards * mask)
 
-            # The quantity the controller regulates: the shaper's mean
-            # per-inner-episode return over the constraint window, on the same
-            # scale as tau.
-            constrained_return = jnp.sum(
-                window_mask * ep_rewards_1
-            ) / float(num_outer_steps)
+            # What each controller regulates: that player's mean
+            # per-inner-episode return over that constraint's window, on the
+            # same scale as its tau.
+            constrained_returns = jnp.stack(
+                [
+                    jnp.sum(window_masks[k] * ep_rewards[player_index[k]])
+                    / float(num_outer_steps)
+                    for k in range(num_constraints)
+                ],
+                axis=0,
+            )
 
             long_traj_1 = to_long_trajectory(traj_1)
             a1_state, a1_mem, a1_metrics = agent1.update(
@@ -395,7 +493,7 @@ class CoalaPGLagrangianRunner:
                 env_stats,
                 ep_rewards_1,
                 ep_rewards_2,
-                constrained_return,
+                constrained_returns,
                 a1_state,
                 a1_mem,
                 a1_metrics,
@@ -423,24 +521,30 @@ class CoalaPGLagrangianRunner:
         print(f"Co-player batch (B = num_envs): {self.args.num_envs}")
         print(f"Independent co-players (num_opps): {self.args.num_opps}")
         print(f"Log interval: {log_interval}")
-        print("Constrained welfare (Lagrangian):")
-        print(f"  objective: W + lam * (R_s - tau), tau = {self.tau}")
-        window = (
-            "whole meta-episode"
-            if self.constraint_window <= 0 or self.constraint_window >= M
-            else f"last {self.constraint_window} of {M} inner episodes"
-        )
-        print(f"  constraint window: {window}")
-        c = self.controller
         print(
-            f"  PID gains: kp={c.kp} ki={c.ki} kd={c.kd}"
-            + ("   (kp=kd=0 => RCPO dual ascent)" if c.kp == 0 and c.kd == 0 else "")
+            f"Constrained welfare: W + sum_k lam_k (R_k - tau_k), "
+            f"{self.num_constraints} constraint(s)"
         )
-        print(
-            f"  lam_init={c.lam} lam_max={c.lam_max} ema_beta={c.ema_beta}"
-            + ("   [FROZEN: static weighted-welfare ablation]" if self.freeze_lam else "")
-        )
-        print(f"  tau is per inner episode, so read it off the payoff matrix.")
+        for c, ctrl in zip(self.constraints, self.controllers):
+            window = (
+                "whole meta-episode"
+                if c["window"] <= 0 or c["window"] >= M
+                else f"last {c['window']} of {M} episodes"
+            )
+            rcpo = (
+                "  (kp=kd=0 => RCPO dual ascent)"
+                if c["kp"] == 0 and c["kd"] == 0
+                else ""
+            )
+            print(f"  [{c['name']}] tau={c['tau']:.4f}  window: {window}")
+            print(
+                f"      kp={c['kp']} ki={c['ki']} kd={c['kd']} "
+                f"lam_init={c['lam_init']} lam_max={c['lam_max']} "
+                f"ema_beta={c['ema_beta']}{rcpo}"
+            )
+        if self.freeze_lam:
+            print("  [FROZEN: static weighted-welfare ablation]")
+        print("  tau is per inner episode -- read it off the payoff matrix.")
 
         for i in range(num_iters):
             rng, rng_run = jax.random.split(rng, 2)
@@ -449,7 +553,7 @@ class CoalaPGLagrangianRunner:
                 env_stats,
                 ep_rewards_1,
                 ep_rewards_2,
-                constrained_return,
+                constrained_returns,
                 a1_state,
                 a1_mem,
                 a1_metrics,
@@ -463,15 +567,22 @@ class CoalaPGLagrangianRunner:
                 a2_state,
                 a2_mem,
                 env_params,
-                jnp.asarray(lam_used, dtype=jnp.float32),
+                lam_used,
             )
 
-            # ---- dual update, on the host, after the primal step ----
-            r_constrained = float(constrained_return)
+            # ---- dual updates, on the host, after the primal step ----
+            r_constrained = [float(x) for x in constrained_returns]
             if self.freeze_lam:
-                self.controller.delta = self.tau - r_constrained
+                for ctrl, r in zip(self.controllers, r_constrained):
+                    ctrl.delta = ctrl.tau - r
             else:
-                self.lam = self.controller.update(r_constrained)
+                self.lam = jnp.asarray(
+                    [
+                        ctrl.update(r)
+                        for ctrl, r in zip(self.controllers, r_constrained)
+                    ],
+                    dtype=jnp.float32,
+                )
 
             if i % self.args.save_interval == 0:
                 log_savepath = os.path.join(self.save_dir, f"iteration_{i}")
@@ -485,7 +596,8 @@ class CoalaPGLagrangianRunner:
             if i % log_interval == 0:
                 first_1, last_1 = float(ep_rewards_1[0]), float(ep_rewards_1[-1])
                 first_2, last_2 = float(ep_rewards_2[0]), float(ep_rewards_2[-1])
-                violation = self.tau - r_constrained
+                lam_used_f = [float(x) for x in lam_used]
+                lam_next_f = [float(x) for x in self.lam]
                 print(f"Iteration {i}")
                 print(
                     f"  episode 1   : shaper {first_1:.4f} | co-player {first_2:.4f}"
@@ -498,22 +610,40 @@ class CoalaPGLagrangianRunner:
                     f"co-player {float(ep_rewards_2.mean()):.4f} | "
                     f"welfare {float(ep_rewards_1.mean() + ep_rewards_2.mean()):.4f}"
                 )
-                # R_s is the windowed quantity the constraint is actually on;
-                # it differs from meta-mean whenever a window is in use.
-                print(
-                    f"  constraint  : R_s {r_constrained:.4f} vs tau {self.tau:.4f}"
-                    f" | violation {violation:+.4f}"
-                    f" | {'VIOLATED' if violation > 0 else 'satisfied'}"
+                n_violated = 0
+                for k, (c, ctrl) in enumerate(
+                    zip(self.constraints, self.controllers)
+                ):
+                    viol = ctrl.tau - r_constrained[k]
+                    n_violated += viol > 0
+                    # R_k is the WINDOWED quantity the constraint is on; it
+                    # differs from meta-mean whenever a window is in use.
+                    print(
+                        f"  [{c['name']:<9}] R {r_constrained[k]:8.4f} vs tau "
+                        f"{ctrl.tau:8.4f} | viol {viol:+8.4f} | "
+                        f"{'VIOLATED ' if viol > 0 else 'satisfied'} | "
+                        f"lam {lam_used_f[k]:.4f} -> {lam_next_f[k]:.4f} "
+                        f"(I {ctrl._integral:.4f} P {ctrl.p_term:+.4f} "
+                        f"D {ctrl.d_term:+.4f})"
+                    )
+                # The effective reward weights the policy actually saw. Watch
+                # for either weight running away: lam_k = 4 already means a 5x
+                # weight on that player, i.e. the welfare term is gone.
+                w_s = 1.0 + sum(
+                    lam_used_f[k]
+                    for k, c in enumerate(self.constraints)
+                    if c["player_index"] == 0
+                )
+                w_o = 1.0 + sum(
+                    lam_used_f[k]
+                    for k, c in enumerate(self.constraints)
+                    if c["player_index"] == 1
                 )
                 print(
-                    f"  multiplier  : lam_used {lam_used:.4f} -> lam_next "
-                    f"{self.lam:.4f}  (I {self.controller._integral:.4f} | "
-                    f"P {self.controller.p_term:+.4f} | "
-                    f"D {self.controller.d_term:+.4f})"
-                )
-                print(
-                    f"  self weight : (1 + lam) = {1.0 + lam_used:.4f} on r_s,"
-                    f" 1.0 on r_o"
+                    f"  weights     : (1+lam_s) = {w_s:.4f} on r_s | "
+                    f"(1+lam_o) = {w_o:.4f} on r_o | ratio {w_s / w_o:.3f}"
+                    f" | feasible: {self.num_constraints - n_violated}"
+                    f"/{self.num_constraints}"
                 )
                 for stat, val in env_stats.items():
                     print(f"  {stat}: {float(val)}")
@@ -528,6 +658,35 @@ class CoalaPGLagrangianRunner:
                     agent2._logger.metrics = agent2._logger.metrics | flat_a2
                     for watcher, agent in zip(watchers, agents):
                         watcher(agent)
+
+                    per_constraint = {}
+                    for k, (c, ctrl) in enumerate(
+                        zip(self.constraints, self.controllers)
+                    ):
+                        tag = c["name"].replace("-", "_")
+                        viol = ctrl.tau - r_constrained[k]
+                        per_constraint[
+                            f"train/lagrangian/{tag}/constrained_return"
+                        ] = r_constrained[k]
+                        per_constraint[f"train/lagrangian/{tag}/lam_used"] = (
+                            lam_used_f[k]
+                        )
+                        per_constraint[f"train/lagrangian/{tag}/violation"] = (
+                            viol
+                        )
+                        per_constraint[f"train/lagrangian/{tag}/feasible"] = (
+                            float(viol <= 0)
+                        )
+                        per_constraint[f"train/lagrangian/{tag}/tau"] = ctrl.tau
+                        per_constraint[f"train/lagrangian/{tag}/integral"] = (
+                            ctrl._integral
+                        )
+                        per_constraint[f"train/lagrangian/{tag}/p_term"] = (
+                            ctrl.p_term
+                        )
+                        per_constraint[f"train/lagrangian/{tag}/d_term"] = (
+                            ctrl.d_term
+                        )
 
                     wandb.log(
                         {
@@ -546,21 +705,22 @@ class CoalaPGLagrangianRunner:
                             "train/final_episode/player_1": last_1,
                             "train/final_episode/player_2": last_2,
                             "train/shaping_delta/player_2": last_2 - first_2,
-                            # The constraint, the multiplier, and the effective
-                            # reward weight it implies.
-                            "train/lagrangian/constrained_return": r_constrained,
-                            "train/lagrangian/lam_used": lam_used,
-                            "train/lagrangian/self_weight": 1.0 + lam_used,
-                            "train/lagrangian/feasible": float(violation <= 0),
+                            # Effective reward weights, and whether every
+                            # constraint is satisfied at once -- the thing the
+                            # "cooperation is established" claim rests on.
+                            "train/lagrangian/self_weight": w_s,
+                            "train/lagrangian/opponent_weight": w_o,
+                            "train/lagrangian/weight_ratio": w_s / w_o,
+                            "train/lagrangian/all_feasible": float(
+                                n_violated == 0
+                            ),
+                            "train/lagrangian/num_violated": float(n_violated),
                         }
+                        | per_constraint
+                        | {k2: float(v) for k2, v in env_stats.items()}
                         | {
-                            f"train/{k}": float(v)
-                            for k, v in self.controller.metrics().items()
-                        }
-                        | {k: float(v) for k, v in env_stats.items()}
-                        | {
-                            f"train/shaper/{k}": float(v)
-                            for k, v in flat_a1.items()
+                            f"train/shaper/{k2}": float(v)
+                            for k2, v in flat_a1.items()
                         },
                     )
 

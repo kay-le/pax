@@ -34,10 +34,14 @@ set -euo pipefail
 #   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline lagrangian_coala_pg_v_tabular
 #   # RCPO dual-ascent baseline: same file, P and D gains zeroed.
 #   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline lagrangian_coala_pg_v_tabular ++welfare.kp=0 ++welfare.kd=0
-#   # Static weighted-welfare ablation: lam frozen at lam_init.
+#   # Static weighted-welfare ablation: both lam frozen at lam_init.
 #   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline lagrangian_coala_pg_v_tabular ++welfare.freeze_lam=True ++welfare.lam_init=1.0
 #   # Constrain the whole meta-episode instead of the last K episodes.
 #   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline lagrangian_coala_pg_v_tabular ++welfare.constraint_window=0
+#   # Per-constraint tau (list index 0 = shaper, 1 = co-player).
+#   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline lagrangian_coala_pg_v_tabular ++welfare.constraints.0.tau=-17.5 ++welfare.constraints.1.tau=-20
+#   # DROP the co-player constraint, to show both constraints are needed.
+#   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline lagrangian_coala_pg_v_tabular '++welfare.constraints=[{player:shaper,tau:-20.0}]'
 
 PLATFORM=${1:-tri}
 SEED=${2:-0}
