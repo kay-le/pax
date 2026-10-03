@@ -571,14 +571,18 @@ class CoalaPGLagrangianRunner:
                     f"co-player {float(ep_rewards_2.mean()):.4f} | "
                     f"welfare {float(ep_rewards_1.mean() + ep_rewards_2.mean()):.4f}"
                 )
+                meta_means = [
+                    float(ep_rewards_1.mean()),
+                    float(ep_rewards_2.mean()),
+                ]
                 n_violated = 0
+                n_ir_violated = 0
                 for k, (c, ctrl) in enumerate(
                     zip(self.constraints, self.controllers)
                 ):
                     viol = ctrl.tau - r_constrained[k]
                     n_violated += viol > 0
-                    # R_k is the WINDOWED quantity the constraint is on; it
-                    # differs from meta-mean whenever a window is in use.
+                    # R_k is the WINDOWED quantity the dual actually regulates.
                     print(
                         f"  [{c['name']:<9}] R {r_constrained[k]:8.4f} vs tau "
                         f"{ctrl.tau:8.4f} | viol {viol:+8.4f} | "
@@ -587,6 +591,28 @@ class CoalaPGLagrangianRunner:
                         f"(I {ctrl._integral:.4f} P {ctrl.p_term:+.4f} "
                         f"D {ctrl.d_term:+.4f})"
                     )
+                    # Individual rationality is a statement about the WHOLE
+                    # meta-episode: the alternative to shaping (always defect)
+                    # pays v_ref in every episode, early ones included. So
+                    # always report it, whatever window the dual uses -- a
+                    # windowed constraint can read "satisfied" while the full
+                    # meta-episode violates, and reporting only the former
+                    # would claim IR that does not hold. Measured at
+                    # window=5: tail -19.03 "satisfied" vs meta-mean -21.59.
+                    ir_viol = ctrl.tau - meta_means[c["reward_index"]]
+                    n_ir_violated += ir_viol > 0
+                    if c["window"] > 0 and c["window"] < M:
+                        flag = (
+                            "  <-- WINDOW HIDES AN IR VIOLATION"
+                            if ir_viol > 0 and viol <= 0
+                            else ""
+                        )
+                        print(
+                            f"      full-meta IR: {meta_means[c['reward_index']]:8.4f}"
+                            f" vs {ctrl.tau:8.4f} | viol {ir_viol:+8.4f} | "
+                            f"{'VIOLATED' if ir_viol > 0 else 'satisfied'}"
+                            f"{flag}"
+                        )
                 # The effective reward weights the policy actually saw. Watch
                 # for either weight running away: lam_k = 4 already means a 5x
                 # weight on that player, i.e. the welfare term is gone.
@@ -604,6 +630,8 @@ class CoalaPGLagrangianRunner:
                     f"  weights     : (1+lam_s) = {w_s:.4f} on r_s | "
                     f"(1+lam_o) = {w_o:.4f} on r_o | ratio {w_s / w_o:.3f}"
                     f" | feasible: {self.num_constraints - n_violated}"
+                    f"/{self.num_constraints}"
+                    f" | full-meta IR: {self.num_constraints - n_ir_violated}"
                     f"/{self.num_constraints}"
                 )
                 for stat, val in env_stats.items():
@@ -648,6 +676,21 @@ class CoalaPGLagrangianRunner:
                         per_constraint[f"train/lagrangian/{tag}/d_term"] = (
                             ctrl.d_term
                         )
+                        # Full-meta-episode IR, independent of the window the
+                        # dual regulates. THIS is the quantity the paper's
+                        # "no self-sacrifice / no exploitation" claim rests on.
+                        ir_viol = (
+                            ctrl.tau - meta_means[c["reward_index"]]
+                        )
+                        per_constraint[
+                            f"train/lagrangian/{tag}/ir_full_meta_return"
+                        ] = meta_means[c["reward_index"]]
+                        per_constraint[
+                            f"train/lagrangian/{tag}/ir_full_meta_violation"
+                        ] = ir_viol
+                        per_constraint[
+                            f"train/lagrangian/{tag}/ir_full_meta_feasible"
+                        ] = float(ir_viol <= 0)
 
                     wandb.log(
                         {
@@ -676,6 +719,14 @@ class CoalaPGLagrangianRunner:
                                 n_violated == 0
                             ),
                             "train/lagrangian/num_violated": float(n_violated),
+                            # Both players individually rational over the
+                            # whole meta-episode -- the headline condition.
+                            "train/lagrangian/all_ir_full_meta": float(
+                                n_ir_violated == 0
+                            ),
+                            "train/lagrangian/num_ir_violated": float(
+                                n_ir_violated
+                            ),
                         }
                         | per_constraint
                         | {k2: float(v) for k2, v in env_stats.items()}

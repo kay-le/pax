@@ -91,14 +91,31 @@ welfare:
   ema_beta: 0.9
   #
   # CONSTRAINT WINDOW. 0 (or >= M) constrains a player's mean return over the
-  # WHOLE meta-episode. That can be satisfied early and violated late, after
-  # the co-player has converged -- the opposite of "shaping established
-  # cooperation". K constrains only the last K inner episodes, making v_ref a
-  # statement about where the co-player ENDS UP. COALA-PG's estimator already
-  # credits rewards that appear only late, so this costs nothing in the
-  # gradient. 5 of 20 = the last quarter, after the naive A2C learner has had
-  # 15 episodes to converge.
-  constraint_window: 5
+  # WHOLE meta-episode; K constrains only the last K inner episodes.
+  # COALA-PG's estimator already credits rewards that appear only late, so a
+  # window costs nothing in the gradient.
+  #
+  # THE TWO CONSTRAINTS WANT DIFFERENT WINDOWS. They ask different questions.
+  #
+  #   The SHAPER's constraint is individual rationality: "did I do at least as
+  #   well as refusing to shape?" The alternative -- always defect -- yields
+  #   v_ref for EVERY episode, including the early ones, so the comparison
+  #   must be over the whole meta-episode. Windowing it to the tail exempts
+  #   the investment phase from the accounting, which is exactly what
+  #   self-sacrifice is. Measured at constraint_window=5 (seed 1306, 3000
+  #   iters): the tail reported R_s = -19.03 >= -20 "satisfied" while the
+  #   shaper's meta-mean was -21.59, i.e. BELOW its own security level. The
+  #   implied first-15-episode mean was -22.4: the shaper paid -22.4/episode
+  #   for 15 episodes to buy -19.0 in the last 5, and the constraint called
+  #   that fine. So: window 0 for the shaper.
+  #
+  #   The CO-PLAYER's constraint is the "cooperation is established" claim,
+  #   which genuinely IS about where the naive learner ends up -- it needs
+  #   several episodes to converge, and its early returns say nothing about
+  #   the equilibrium the shaper steered it to. So: a tail window, 5 of 20 =
+  #   the last quarter, after 15 episodes of learning.
+  constraint_window_shaper: 0
+  constraint_window_opponent: 5
 
   # ---- reference values (the constraint floors) ----
   #
