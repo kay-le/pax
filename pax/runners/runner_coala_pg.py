@@ -385,17 +385,31 @@ class CoalaPGRunner:
                     slack_1 = ep_rewards_1.mean() - _objective_state[6]
                     slack_2 = ep_rewards_2.mean() - _objective_state[7]
 
-                # dL/dR_k = 1 + mu_k + rho_k * max(0, v_ref_k - R_k), capped so
-                # the reward scale handed to the critic stays bounded.
+                # dL/dR_k = 1 + mu_k + rho_k * max(0, v_ref_k - R_k).
                 w1 = 1.0 + _objective_state[2] + _objective_state[4] * jnp.maximum(
                     0.0, -slack_1
                 )
                 w2 = 1.0 + _objective_state[3] + _objective_state[5] * jnp.maximum(
                     0.0, -slack_2
                 )
-                weight_cap = _objective_state[8]
-                w1 = jnp.minimum(w1, weight_cap)
-                w2 = jnp.minimum(w2, weight_cap)
+                if not weight_normalization:
+                    # `weight_max` exists only to bound the reward scale fed to
+                    # the critic. Normalization already does that exactly --
+                    # after dividing by the mean weight, w1 + w2 == 2
+                    # identically -- so capping BEFORE normalizing can only
+                    # distort the ratio, which is the whole informative content
+                    # of the Lagrangian direction. Worse, once both weights hit
+                    # the same cap the ratio collapses to 1:1 and every
+                    # per-episode and per-player distinction is erased.
+                    # Measured on IPD at v_ref=(-15,-15): w_shaper pinned at
+                    # exactly 10.0 (= weight_max) in every episode while
+                    # w_co-player sat at 8.6, and that run drifted into the
+                    # all-defect basin. So the cap applies only on the
+                    # un-normalized path, where it is still the sole protection
+                    # against an unbounded reward scale.
+                    weight_cap = _objective_state[8]
+                    w1 = jnp.minimum(w1, weight_cap)
+                    w2 = jnp.minimum(w2, weight_cap)
             else:
                 w1 = _objective_state[0]
                 w2 = _objective_state[1]
