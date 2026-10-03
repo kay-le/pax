@@ -28,6 +28,7 @@ from pax.agents.welfare_shaper.welfare_shaper import make_welfare_shaper_agent
 from pax.agents.coala_pg.coala_pg import (
     make_coala_a2c_agent,
     make_coala_pg_agent,
+    make_coala_pg_lagrangian_agent,
 )
 from pax.agents.naive.naive import make_naive_pg
 from pax.agents.naive_exact import NaiveExact
@@ -90,6 +91,9 @@ from pax.runners.runner_welfare_evo import WelfareEvoRunner
 from pax.runners.runner_welfare_unconstrained_evo import WelfareUnconstrainedEvoRunner
 from pax.runners.runner_welfare_marl import WelfareRLRunner
 from pax.runners.runner_coala_pg import CoalaPGRunner
+from pax.runners.runner_coala_pg_lagrangian import (
+    CoalaPGLagrangianRunner,
+)
 from pax.runners.runner_eval_welfare import WelfareEvalRunner
 
 from pax.envs.iterated_tensor_game_n_player import IteratedTensorGameNPlayer
@@ -560,6 +564,12 @@ def runner_setup(args, env, agents, save_dir, logger):
     elif args.runner == "coala_pg":
         logger.info("Training with COALA-PG runner (learning-aware PG)")
         return CoalaPGRunner(agents, env, save_dir, args)
+    elif args.runner == "coala_pg_lagrangian":
+        logger.info(
+            "Training with Lagrangian COALA-PG runner "
+            "(constrained welfare, PID dual)"
+        )
+        return CoalaPGLagrangianRunner(agents, env, save_dir, args)
     elif args.runner == "rl":
         logger.info("Training with RL Runner")
         return RLRunner(agents, env, save_dir, args)
@@ -759,6 +769,28 @@ def agent_setup(args, env, env_params, logger):
             player_id=player_id,
         )
 
+    def get_coala_pg_lagrangian_agent(seed, player_id):
+        """COALA-PG shaper on a constrained-welfare Lagrangian.
+
+        Same torso and hyperparameters as `get_coala_pg_agent`; the network has
+        a second value head for the constraint return.
+        """
+        default_player_args = omegaconf.OmegaConf.select(
+            args, "ppo_default", default=None
+        )
+        agent_args = omegaconf.OmegaConf.select(
+            args, "ppo" + str(player_id), default=default_player_args
+        )
+        return make_coala_pg_lagrangian_agent(
+            args,
+            agent_args,
+            obs_spec=obs_shape,
+            num_iterations=args.num_iters,
+            action_spec=num_actions,
+            seed=seed,
+            player_id=player_id,
+        )
+
     def get_coala_a2c_agent(seed, player_id):
         """Naive A2C co-player used by the COALA-PG paper."""
         default_player_args = omegaconf.OmegaConf.select(
@@ -843,6 +875,7 @@ def agent_setup(args, env, env_params, logger):
         "WelfareShaper": get_welfare_shaper_agent,
         "WelfareShaperAtt": get_welfare_shaper_att_agent,
         "CoalaPG": get_coala_pg_agent,
+        "CoalaPGLagrangian": get_coala_pg_lagrangian_agent,
         "CoalaA2C": get_coala_a2c_agent,
         # HyperNetworks
         "Hyper": get_hyper_agent,
@@ -980,6 +1013,7 @@ def watcher_setup(args, logger):
         "WelfareShaper": dumb_log,
         "WelfareShaperAtt": ppo_memory_log,
         "CoalaPG": ppo_memory_log,
+        "CoalaPGLagrangian": ppo_memory_log,
         "CoalaA2C": ppo_memory_log,
         "PPO": ppo_log,
         "LOLA": dumb_log,
@@ -1065,6 +1099,7 @@ def main(args):
         "tensor_rl_nplayer",
         "welfare_rl",
         "coala_pg",
+        "coala_pg_lagrangian",
     ]:
         # number of episodes
         print(f"Number of Episodes: {args.num_iters}")

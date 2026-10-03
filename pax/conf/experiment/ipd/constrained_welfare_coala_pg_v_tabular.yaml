@@ -40,33 +40,29 @@ num_devices: 1
 # Constrained welfare settings.
 #
 # CHOOSING v_ref. With T=10 the per-episode return range is about -10 (all-CC)
-# to -20 (all-DD). The -20 bound is mostly a sanity check because it usually
-# leaves the constraint inactive; -15 is a hard ablation and has shown strong
-# seed bimodality. Use -17.5 as the default sweep midpoint: it binds more often
-# than -20 without immediately forcing the dual loop into the unstable regime.
+# to -20 (all-DD), so v_ref must sit strictly inside that band to bind:
+#   -20.0  the constraint never activates. Measured: mu stayed at 0.0 for all
+#          3000 iterations and slack was +5 to +9, i.e. the run was plain
+#          welfare COALA-PG (w = (1,1)) with dead constraint machinery. It
+#          converged well (CC 0.99, DD 0.02, welfare -25.6).
+#   -15.0  infeasible for the shaper: its meta-mean averages over the early
+#          inner episodes where the freshly initialised co-player still
+#          defects, so -1.5/step is unreachable at M=20. Measured: mu1 wound
+#          up to 50 and rho1 pinned at rho_max, and the policy went
+#          uniform-random (cooperation probability 0.20 at every state).
+#   -17.0  the binding region. Sweep -18 / -17 / -16 for the frontier.
 welfare:
   rho1: 1.0
   rho2: 1.0
   rho_schedule: 1.5
   rho_patience: 30
-  # rho must stay O(1 + mu), or the penalty term dominates and the weight ratio
-  # saturates against weight_ratio_max in EVERY episode -- which erases the
-  # per-episode variation that `slack_per_episode` exists to create. Checked
-  # against a measured run (violations 1.2-5.1, mu=(2.0, 1.75)):
-  #   rho=10, 5  -> raw ratio 3.3-19.7, clipped flat at 3.0 in every episode
-  #   rho=2      -> raw ratio 2.0-4.8, informative in the first half
-  #   rho=1      -> raw ratio 1.5-3.0, informative throughout
-  # rho has ratcheted to its ceiling in every run so far, so this ceiling is
-  # what actually governs; keep it low.
-  rho_max: 2.0
+  rho_max: 50
   mu1: 0.0
   mu2: 0.0
-  # Keep the dual loop slower than the PPO loop. Faster dual updates were useful
-  # for debugging windup, but make seed-to-seed bimodality worse at tight bounds.
   dual_lr: 0.002
   calibration: False      # not implemented for runner=coala_pg; must be False
-  v_ref_shaper: -17.5
-  v_ref_opponent: -17.5
+  v_ref_shaper: -15.0
+  v_ref_opponent: -15.0
 
   # PG-specific safeguards. `runner_welfare_evo` needs none of these: ES has no
   # critic, so a uniform rescaling of its Lagrangian fitness is absorbed by
@@ -74,34 +70,37 @@ welfare:
   # is an unbounded reward scale feeding a critic that regresses undiscounted
   # returns over M*T steps. All three are no-ops whenever the constraints are
   # slack (mu=0, w=(1,1)), so they cannot change the -20.0 result above.
-  mu_max: 2.0               # cap the dual variable; stops integrator windup
-                            # and keeps the unwind time ~400 iterations at the
-                            # dual_lr above
-  # Bound the player-to-player weight RATIO, which is the only part of the
-  # Lagrangian that normalization passes through to the policy. Both extremes
-  # were measured at v_ref=(-15,-15) and each deletes half the objective:
-  #   raw cap of 10   -> both weights pin at the cap, ratio -> 1:1, the penalty
-  #                      carries no information and this is just welfare
-  #                      (that run drifted to the all-defect basin);
-  #   no cap          -> rho*max(0,-s) is unbounded in the violation, so a
-  #                      ONE-SIDED violation (shaper -2.8, co-player +1.1) ran
-  #                      the ratio to 11.2:1 (w = 30.9 vs 2.75), i.e. an
-  #                      effectively selfish objective with no welfare term.
-  # 5.0 is a middle ground: 3.0 can make the constraint too weak, while no cap
-  # can turn a one-sided violation into an effectively selfish objective.
-  weight_ratio_max: 5.0
-  weight_max: 10.0          # hard cap on 1 + mu + rho*max(0,-s). IGNORED when
-                            # weight_normalization is True (ratio clipping above
-                            # supersedes it); applies only on the un-normalized
-                            # path, where it is the sole scale protection
+  mu_max: 5.0               # cap the dual variable; stops integrator windup
+  #
+  # WARNING -- rho_max 50 and slack_per_episode False are incompatible.
+  # With a single scalar slack, w_k = 1 + mu_k + rho*max(0,-s_k) exceeds
+  # weight_max for BOTH players as soon as both violate by more than ~0.04, so
+  # both clip to weight_max, the ratio becomes exactly 1:1, and after
+  # normalization the objective is plain welfare -- the constraint is erased.
+  # Swept over an (s1,s2) grid of +-4 at mu=(5,5), the fraction of the grid
+  # where the ratio collapses to 1:1 is:
+  #     rho_max=50 -> 88.9%     rho_max=10 -> 78.5%
+  #     rho_max=2  -> 30.8%     rho_max=1  ->  5.9%
+  # rho_max=50 survived in the best measured run ONLY because
+  # slack_per_episode was True there: per-episode variation meant some
+  # episodes escaped the clip. With False, set rho_max to 1.0 (i.e. no
+  # ratcheting above rho1) or raise weight_max instead. Left at 50 here
+  # because the rollback target asked for it -- change one or the other
+  # before trusting a run from this config.
+  weight_max: 10.0          # hard cap on 1 + mu + rho*max(0,-s)
   weight_normalization: True  # divide the reward stream by the mean weight, so
                               # the critic sees a stationary target scale and
                               # only the player-to-player weight RATIO (the
                               # actual Lagrangian direction) reaches the policy
-  slack_per_episode: False  # faithful constrained objective: one constraint
-                            # slack from the whole meta-trajectory return.
-                            # True is a stabilizing heuristic ablation, not the
-                            # exact constrained-welfare objective.
+  # FAITHFUL constrained objective: one slack from the whole meta-trajectory
+  # return, matching the Lagrangian this variant claims to optimize. True
+  # resolves the slack per inner episode so the quadratic penalty varies along
+  # M (the way the ES penalty varies across population members) -- that is a
+  # stabilizing heuristic, not the stated objective, and it is what the best
+  # measured run used (welfare -26.6, CC 0.90). Kept False deliberately: the
+  # exact objective matters more here than matching that one seed, so these
+  # hyperparameters are no longer the ones that produced it.
+  slack_per_episode: False
 
 # COALA-PG shaper (agent1), constrained welfare objective.
 ppo1:

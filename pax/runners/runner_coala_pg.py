@@ -428,34 +428,28 @@ class CoalaPGRunner:
                 w2 = 1.0 + _objective_state[3] + _objective_state[5] * jnp.maximum(
                     0.0, -slack_2
                 )
-                if weight_normalization:
-                    # Bound the RATIO, which is the only thing normalization
-                    # passes through to the policy. Two degenerate regimes were
-                    # measured on IPD at v_ref=(-15,-15), both of which delete
-                    # half the objective:
-                    #
-                    #   capping the raw weights at 10 -> both players pin at the
-                    #     cap, ratio -> 1:1, the penalty's per-episode and
-                    #     per-player information is erased and the objective is
-                    #     plain welfare (run drifted to the all-defect basin);
-                    #   no cap at all -> rho * max(0,-s) grows without bound in
-                    #     the violation, so a one-sided violation runs the ratio
-                    #     to 11:1 (w = 30.9 vs 2.75) and the objective is
-                    #     effectively selfish, welfare term gone.
-                    #
-                    # Clipping the ratio keeps both players materially present
-                    # while still letting the Lagrangian tilt between them. The
-                    # scale is handled downstream by normalization, so nothing
-                    # here can de-calibrate the critic.
-                    ratio_cap = _objective_state[9]
-                    ratio = jnp.clip(w1 / w2, 1.0 / ratio_cap, ratio_cap)
-                    w1, w2 = ratio, jnp.ones_like(ratio)
-                else:
-                    # Un-normalized path: `weight_max` is the only protection
-                    # against an unbounded reward scale reaching the critic.
-                    weight_cap = _objective_state[8]
-                    w1 = jnp.minimum(w1, weight_cap)
-                    w2 = jnp.minimum(w2, weight_cap)
+                # ROLLED BACK to the e23685d behaviour: an unconditional cap
+                # on the raw weights. This is the only configuration in which a
+                # measured run satisfied BOTH constraints at v_ref=(-15,-15)
+                # (slack +1.3 / +2.1, CC cooperation 0.90, welfare -26.6).
+                #
+                # The two later variants both measured worse:
+                #   ratio clipping after normalization -> once rho is large
+                #     the ratio saturates against the cap, erasing the tilt
+                #     it was meant to preserve;
+                #   no cap at all -> rho * max(0,-s) is unbounded in the
+                #     violation, so a one-sided violation ran the ratio to
+                #     11:1 (w = 30.9 vs 2.75), i.e. an effectively selfish
+                #     objective (welfare -31.7, sucker policy coop|DC = 0.76).
+                #
+                # CAVEAT: a second seed at these exact settings landed in the
+                # all-defect basin (welfare -36.3, CC 0.31). This point is one
+                # success out of two seeds, not a reliable optimum -- the
+                # outcome is bimodal and needs several seeds to characterise.
+                # `weight_ratio_max` is still read by the surrogate objective.
+                weight_cap = _objective_state[8]
+                w1 = jnp.minimum(w1, weight_cap)
+                w2 = jnp.minimum(w2, weight_cap)
             else:
                 w1 = _objective_state[0]
                 w2 = _objective_state[1]

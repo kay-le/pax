@@ -202,6 +202,71 @@ def make_coala_ipd_network(num_actions: int, hidden_size: int = 32):
     return network, hidden_state
 
 
+class ZeroInitDualValueHead(hk.Module):
+    """Policy readout plus TWO value readouts, stacked on the last axis.
+
+    Head 0 estimates the WELFARE return, head 1 the shaper's own (constraint)
+    return. The Lagrangian baseline is ``V_W + lam * V_c``.
+
+    Why two heads rather than one critic trained on the composite return
+    ``r_W + lam * r_c``: lam moves after every meta-trajectory, so a composite
+    critic is stale by exactly the amount lam just changed, and it is most
+    stale precisely when the constraint starts binding (when lam is moving
+    fastest). Fitting the two returns separately and combining them with the
+    current lam keeps the baseline unbiased for any lam.
+    """
+
+    def __init__(self, num_actions: int):
+        super().__init__(name="zero_init_dual_value_head")
+        self._num_actions = num_actions
+
+    def __call__(self, inputs: jnp.ndarray):
+        logits = hk.Linear(
+            self._num_actions,
+            w_init=hk.initializers.Constant(0),
+            b_init=hk.initializers.Constant(0),
+            name="policy_logits",
+        )(inputs)
+        value_welfare = hk.Linear(
+            1,
+            w_init=hk.initializers.Constant(0),
+            b_init=hk.initializers.Constant(0),
+            name="value_welfare",
+        )(inputs)
+        value_cost = hk.Linear(
+            1,
+            w_init=hk.initializers.Constant(0),
+            b_init=hk.initializers.Constant(0),
+            name="value_cost",
+        )(inputs)
+        values = jnp.concatenate([value_welfare, value_cost], axis=-1)
+        return distrax.Categorical(logits=logits), values
+
+
+def make_coala_ipd_dual_value_network(
+    num_actions: int, hidden_size: int = 32
+):
+    """`make_coala_ipd_network` with a two-headed critic (welfare, own-return).
+
+    The torso is identical to the stock COALA-PG network, so the only
+    difference between the Lagrangian agent and the baseline is the extra value
+    readout and how the advantage is combined -- which is what lets the
+    three-way comparison (selfish / welfare / constrained) be attributed to the
+    objective rather than to the architecture.
+    """
+    hidden_state = jnp.zeros((1, hidden_size))
+
+    def forward_fn(
+        observations: jnp.ndarray, state: jnp.ndarray
+    ) -> Tuple[Tuple[distrax.Categorical, jnp.ndarray], jnp.ndarray]:
+        embedding, state = CoalaIpdTorso(width=hidden_size)(observations, state)
+        dist, values = ZeroInitDualValueHead(num_actions)(embedding)
+        return (dist, values), state
+
+    network = hk.without_apply_rng(hk.transform(forward_fn))
+    return network, hidden_state
+
+
 class Batch(NamedTuple):
     """A batch of data; all shapes are expected to be [B, ...]."""
 
@@ -729,6 +794,462 @@ class CoalaPG(AgentInterface):
         return state, mem, metrics
 
 
+
+class LagrangianBatch(NamedTuple):
+    """A batch of data; all shapes are expected to be [B, ...].
+
+    Differs from `Batch` in that `target_values` and `behavior_values` carry
+    both critic heads on a trailing axis of size 2, while `advantages` is
+    already the lam-combined scalar.
+    """
+
+    observations: jnp.ndarray
+    actions: jnp.ndarray
+    advantages: jnp.ndarray
+    target_values: jnp.ndarray
+    behavior_values: jnp.ndarray
+    behavior_log_probs: jnp.ndarray
+    hiddens: jnp.ndarray
+
+
+class CoalaPGLagrangian(AgentInterface):
+    """COALA-PG on the Lagrangian of a constrained welfare problem.
+
+        max_theta  W(theta)   s.t.   R_s(theta) >= tau
+
+    with Lagrangian ``L = W + lam * (R_s - tau)``. Both terms are expectations
+    over the SAME trajectories, so the Lagrangian gradient is just the COALA-PG
+    gradient of a reshaped reward,
+
+        r_mix = (r_s + r_o) + lam * r_s = (1 + lam) * r_s + r_o,
+
+    and the learning-aware estimator (`coala_advantages`, Algorithm 1) needs no
+    modification whatsoever. That is the whole point: the comparison against
+    the selfish and plain-welfare objectives isolates the objective, because
+    the estimator, rollout structure and co-player are untouched.
+
+    Rather than reshaping the reward and running one critic, this class keeps
+    the two return streams separate and exploits the fact that Algorithm 1 is
+    LINEAR in (rewards, values):
+
+        adv(r_W + lam*r_c, V_W + lam*V_c) == adv(r_W, V_W) + lam*adv(r_c, V_c)
+
+    so combining two per-stream advantages is algebraically identical to
+    reshaping, while letting each critic head fit its own return. A single
+    critic on the composite return would be biased by exactly the amount lam
+    last moved -- worst precisely when the constraint begins to bind.
+
+    `update` therefore takes an extra argument, the current ``lam``.
+    """
+
+    def __init__(
+        self,
+        network: NamedTuple,
+        initial_hidden_state: jnp.ndarray,
+        optimizer: optax.GradientTransformation,
+        random_key: jnp.ndarray,
+        gru_dim: int,
+        obs_spec: Tuple,
+        num_envs: int = 4,
+        num_opps: int = 2,
+        num_minibatches: int = 16,
+        num_epochs: int = 4,
+        num_inner_steps: int = 100,
+        clip_value: bool = True,
+        value_coeff: float = 0.5,
+        anneal_entropy: bool = False,
+        entropy_coeff_start: float = 0.1,
+        entropy_coeff_end: float = 0.01,
+        entropy_coeff_horizon: int = 3000,
+        ppo_clipping_epsilon: float = 0.2,
+        gamma: float = 0.99,
+        gae_lambda: float = 0.95,
+        advantage_normalization: bool = True,
+        reward_rescaling: float = 1.0,
+        player_id: int = 0,
+    ):
+        @jax.jit
+        def policy(
+            state: TrainingState, observation: jnp.ndarray, mem: MemoryState
+        ):
+            key, subkey = jax.random.split(state.random_key)
+            # `values` is [..., 2]: (welfare head, constraint head).
+            (dist, values), hidden_state = network.apply(
+                state.params, observation, mem.hidden
+            )
+            actions = dist.sample(seed=subkey)
+            mem.extras["values"] = values
+            mem.extras["log_probs"] = dist.log_prob(actions)
+            mem = mem._replace(hidden=hidden_state, extras=mem.extras)
+            state = state._replace(random_key=key)
+            return actions, state, mem
+
+        def loss(
+            params: hk.Params,
+            timesteps: int,
+            observations: jnp.ndarray,
+            actions: jnp.ndarray,
+            behavior_log_probs: jnp.ndarray,
+            target_values: jnp.ndarray,
+            advantages: jnp.ndarray,
+            behavior_values: jnp.ndarray,
+            hiddens: jnp.ndarray,
+        ):
+            """PPO clipped surrogate; value loss summed over both critic heads."""
+            (distribution, values), _ = network.apply(
+                params, observations, hiddens
+            )
+            log_prob = distribution.log_prob(actions)
+            entropy = distribution.entropy()
+
+            rhos = jnp.exp(log_prob - behavior_log_probs)
+            clipped_ratios_t = jnp.clip(
+                rhos, 1.0 - ppo_clipping_epsilon, 1.0 + ppo_clipping_epsilon
+            )
+            clipped_objective = jnp.fmin(
+                rhos * advantages, clipped_ratios_t * advantages
+            )
+            # As in `CoalaPG`: the estimator sums over the co-player minibatch
+            # B, and minibatches are flattened for PPO, so scale by B.
+            policy_loss = -jnp.mean(clipped_objective) * num_envs
+
+            # Each head regresses its OWN return. No lam appears here -- that
+            # is what keeps both baselines valid as lam moves.
+            unclipped_value_loss = (target_values - values) ** 2
+            if clip_value:
+                clipped_values = behavior_values + jnp.clip(
+                    values - behavior_values,
+                    -ppo_clipping_epsilon,
+                    ppo_clipping_epsilon,
+                )
+                clipped_value_loss = (target_values - clipped_values) ** 2
+                per_head_loss = jnp.fmax(
+                    unclipped_value_loss, clipped_value_loss
+                )
+            else:
+                per_head_loss = unclipped_value_loss
+            # Mean over batch, SUM over the two heads: each head should get the
+            # same gradient magnitude it would get as a lone critic.
+            value_loss = jnp.sum(jnp.mean(per_head_loss, axis=0))
+            value_loss_welfare = jnp.mean(per_head_loss[..., 0])
+            value_loss_cost = jnp.mean(per_head_loss[..., 1])
+
+            if anneal_entropy:
+                fraction = jnp.fmax(1 - timesteps / entropy_coeff_horizon, 0)
+                entropy_cost = (
+                    fraction * entropy_coeff_start
+                    + (1 - fraction) * entropy_coeff_end
+                )
+            else:
+                entropy_cost = entropy_coeff_start
+            entropy_loss = -jnp.mean(entropy)
+
+            total_loss = (
+                policy_loss
+                + entropy_cost * entropy_loss
+                + value_loss * value_coeff
+            )
+            return total_loss, {
+                "loss_total": total_loss,
+                "loss_policy": policy_loss,
+                "loss_value": value_loss,
+                "loss_value_welfare": value_loss_welfare,
+                "loss_value_cost": value_loss_cost,
+                "loss_entropy": entropy_loss,
+                "entropy_cost": entropy_cost,
+            }
+
+        @jax.jit
+        def sgd_step(
+            state: TrainingState, sample: NamedTuple, lam: jnp.ndarray
+        ):
+            """One Lagrangian COALA-PG update.
+
+            `sample` is time-major with the co-player batch intact,
+            ``[L, num_opps, num_envs, ...]`` where ``L = M * T``, and carries
+            TWO reward streams:
+
+              * ``rewards``      -- the welfare stream r_s + r_o
+              * ``cost_rewards`` -- the constraint stream (the shaper's own
+                reward, already masked to the constraint window and rescaled
+                by the runner)
+
+            ``behavior_values`` is ``[L, num_opps, num_envs, 2]``.
+            """
+            observations = sample.observations
+            actions = sample.actions
+            rewards_w = sample.rewards
+            rewards_c = sample.cost_rewards
+            behavior_log_probs = sample.behavior_log_probs
+            behavior_values = sample.behavior_values
+            dones = sample.dones
+            hiddens = sample.hiddens
+
+            seq_len = rewards_w.shape[0]
+            n_opps = rewards_w.shape[1]
+            n_envs = rewards_w.shape[2]
+
+            # Both streams share one rescaling so their ratio -- and therefore
+            # the meaning of lam -- is unaffected by it.
+            learning_rewards_w = rewards_w * reward_rescaling
+            learning_rewards_c = rewards_c * reward_rescaling
+
+            # -> [num_opps, num_envs, L] for Algorithm 1.
+            to_alg = lambda x: jnp.transpose(x, (1, 2, 0))
+            r_w_a = to_alg(learning_rewards_w)
+            r_c_a = to_alg(learning_rewards_c)
+            d_a = to_alg(dones)
+            # Split the heads: [L, opps, envs, 2] -> two [opps, envs, L].
+            v_w_a = to_alg(behavior_values[..., 0])
+            v_c_a = to_alg(behavior_values[..., 1])
+
+            boot_w = v_w_a[:, :, -1] * (1.0 - d_a[:, :, -1])
+            boot_c = v_c_a[:, :, -1] * (1.0 - d_a[:, :, -1])
+
+            adv_fn = jax.vmap(
+                coala_advantages, in_axes=(0, 0, 0, 0, None, None, None)
+            )
+            tgt_fn = jax.vmap(
+                coala_value_targets, in_axes=(0, 0, 0, None, None, None)
+            )
+
+            # Algorithm 1 run once per stream. Because it is LINEAR in
+            # (rewards, values), adv_w + lam * adv_c is exactly the advantage
+            # of the reshaped reward r_W + lam * r_c under the combined
+            # baseline V_W + lam * V_c -- no approximation, and no change to
+            # the learning-aware estimator itself.
+            adv_w = adv_fn(
+                r_w_a, v_w_a, d_a, boot_w, gamma, gae_lambda, num_inner_steps
+            )
+            adv_c = adv_fn(
+                r_c_a, v_c_a, d_a, boot_c, gamma, gae_lambda, num_inner_steps
+            )
+            adv_a = adv_w + lam * adv_c
+
+            tgt_w = jax.lax.stop_gradient(
+                tgt_fn(
+                    r_w_a, v_w_a, boot_w, gamma, gae_lambda, num_inner_steps
+                )
+            )
+            tgt_c = jax.lax.stop_gradient(
+                tgt_fn(
+                    r_c_a, v_c_a, boot_c, gamma, gae_lambda, num_inner_steps
+                )
+            )
+
+            # Back to time-major, then stack the heads on the last axis.
+            from_alg = lambda x: jnp.transpose(x, (2, 0, 1))
+            advantages = from_alg(adv_a)
+            target_values = jnp.stack(
+                [from_alg(tgt_w), from_alg(tgt_c)], axis=-1
+            )
+
+            trajectories = LagrangianBatch(
+                observations=observations,
+                actions=actions,
+                advantages=advantages,
+                target_values=target_values,
+                behavior_values=behavior_values,
+                behavior_log_probs=behavior_log_probs,
+                hiddens=hiddens,
+            )
+
+            batch_size = seq_len * n_opps * n_envs
+            assert batch_size % num_minibatches == 0, (
+                "num_minibatches must divide batch size. Got batch_size={}"
+                " num_minibatches={}."
+            ).format(batch_size, num_minibatches)
+
+            # Collapse (L, opps, envs) into the batch axis, keeping any
+            # trailing feature axes (including the 2-head value axis).
+            batch = jax.tree_util.tree_map(
+                lambda x: x.reshape((batch_size,) + x.shape[3:]), trajectories
+            )
+
+            grad_fn = jax.jit(jax.grad(loss, has_aux=True))
+
+            def model_update_minibatch(carry, minibatch: LagrangianBatch):
+                params, opt_state, timesteps = carry
+                if advantage_normalization:
+                    advantages_mb = (
+                        minibatch.advantages
+                        - jnp.mean(minibatch.advantages, axis=0)
+                    ) / (jnp.std(minibatch.advantages, axis=0) + 1e-8)
+                else:
+                    advantages_mb = minibatch.advantages
+                gradients, metrics = grad_fn(
+                    params,
+                    timesteps,
+                    minibatch.observations,
+                    minibatch.actions,
+                    minibatch.behavior_log_probs,
+                    minibatch.target_values,
+                    advantages_mb,
+                    minibatch.behavior_values,
+                    minibatch.hiddens,
+                )
+                updates, opt_state = optimizer.update(gradients, opt_state)
+                params = optax.apply_updates(params, updates)
+                metrics["norm_grad"] = optax.global_norm(gradients)
+                metrics["norm_updates"] = optax.global_norm(updates)
+                return (params, opt_state, timesteps), metrics
+
+            def model_update_epoch(carry, unused_t):
+                key, params, opt_state, timesteps, batch = carry
+                key, subkey = jax.random.split(key)
+                permutation = jax.random.permutation(subkey, batch_size)
+                shuffled = jax.tree_util.tree_map(
+                    lambda x: jnp.take(x, permutation, axis=0), batch
+                )
+                minibatches = jax.tree_util.tree_map(
+                    lambda x: jnp.reshape(
+                        x, [num_minibatches, -1] + list(x.shape[1:])
+                    ),
+                    shuffled,
+                )
+                (params, opt_state, timesteps), metrics = jax.lax.scan(
+                    model_update_minibatch,
+                    (params, opt_state, timesteps),
+                    minibatches,
+                    length=num_minibatches,
+                )
+                return (key, params, opt_state, timesteps, batch), metrics
+
+            (key, params, opt_state, timesteps, _), metrics = jax.lax.scan(
+                model_update_epoch,
+                (
+                    state.random_key,
+                    state.params,
+                    state.opt_state,
+                    state.timesteps,
+                    batch,
+                ),
+                (),
+                length=num_epochs,
+            )
+
+            metrics = jax.tree_util.tree_map(jnp.mean, metrics)
+            metrics["rewards_mean"] = jnp.mean(rewards_w)
+            metrics["rewards_std"] = jnp.std(rewards_w)
+            metrics["coala/advantage_mean"] = jnp.mean(advantages)
+            metrics["coala/advantage_std"] = jnp.std(advantages)
+            # The two advantage streams separately: if the welfare term
+            # dominates by orders of magnitude, the constraint cannot bite
+            # whatever lam says.
+            metrics["coala/advantage_welfare_std"] = jnp.std(adv_w)
+            metrics["coala/advantage_cost_std"] = jnp.std(adv_c)
+            metrics["coala/target_value_welfare_mean"] = jnp.mean(tgt_w)
+            metrics["coala/target_value_cost_mean"] = jnp.mean(tgt_c)
+            metrics["coala/reward_rescaling"] = jnp.asarray(reward_rescaling)
+            metrics["coala/policy_batch_scale"] = jnp.asarray(n_envs)
+            metrics["lagrangian/lam_used"] = jnp.asarray(lam)
+
+            new_state = TrainingState(
+                params=params,
+                opt_state=opt_state,
+                random_key=key,
+                timesteps=timesteps + batch_size,
+            )
+            # Memory deliberately not rebuilt -- see the note in `CoalaPG`.
+            return new_state, metrics
+
+        def make_initial_state(
+            key: Any, initial_hidden_state: jnp.ndarray
+        ) -> Tuple[TrainingState, MemoryState]:
+            key, subkey = jax.random.split(key)
+            if isinstance(obs_spec, dict):
+                dummy_obs = {k: jnp.zeros(shape=v) for k, v in obs_spec.items()}
+            else:
+                dummy_obs = jnp.zeros(shape=obs_spec)
+            dummy_obs = utils.add_batch_dim(dummy_obs)
+            initial_params = network.init(
+                subkey, dummy_obs, initial_hidden_state
+            )
+            initial_opt_state = optimizer.init(initial_params)
+            self.optimizer = optimizer
+            return TrainingState(
+                random_key=key,
+                params=initial_params,
+                opt_state=initial_opt_state,
+                timesteps=0,
+            ), MemoryState(
+                hidden=jnp.zeros((num_envs, initial_hidden_state.shape[-1])),
+                extras={
+                    # Two critic heads, hence the trailing 2.
+                    "values": jnp.zeros((num_envs, 2)),
+                    "log_probs": jnp.zeros(num_envs),
+                },
+            )
+
+        self._state, self._mem = make_initial_state(
+            random_key, initial_hidden_state
+        )
+        self.make_initial_state = make_initial_state
+        self._sgd_step = sgd_step
+
+        self._logger = Logger()
+        self._total_steps = 0
+        self._logger.metrics = {
+            "total_steps": 0,
+            "sgd_steps": 0,
+            "loss_total": 0,
+            "loss_policy": 0,
+            "loss_value": 0,
+            "loss_entropy": 0,
+            "entropy_cost": entropy_coeff_start,
+        }
+
+        self.network = network
+        self._policy = policy
+        self.forward = network.apply
+        self.player_id = player_id
+
+        self._num_envs = num_envs
+        self._num_opps = num_opps
+        self._num_minibatches = num_minibatches
+        self._num_epochs = num_epochs
+        self._num_inner_steps = num_inner_steps
+        self._gru_dim = gru_dim
+
+    def reset_memory(self, memory, eval=False) -> MemoryState:
+        num_envs = 1 if eval else self._num_envs
+        memory = memory._replace(
+            extras={
+                "values": jnp.zeros((num_envs, 2)),
+                "log_probs": jnp.zeros(num_envs),
+            },
+            hidden=jnp.zeros((num_envs, self._gru_dim)),
+        )
+        return memory
+
+    def update(
+        self,
+        traj_batch: NamedTuple,
+        obs: jnp.ndarray,
+        state: TrainingState,
+        mem: MemoryState,
+        lam: jnp.ndarray = 0.0,
+    ):
+        """Update at the end of a full meta-trajectory.
+
+        `lam` is the current Lagrange multiplier, supplied by the runner's
+        controller. `mem` is returned unchanged -- see the note in `sgd_step`.
+        """
+        state, metrics = self._sgd_step(state, traj_batch, lam)
+        self._logger.metrics["sgd_steps"] += (
+            self._num_minibatches * self._num_epochs
+        )
+        for k in (
+            "loss_total",
+            "loss_policy",
+            "loss_value",
+            "loss_entropy",
+            "entropy_cost",
+        ):
+            self._logger.metrics[k] = metrics[k]
+        return state, mem, metrics
+
+
 class CoalaA2C(AgentInterface):
     """Naive A2C co-player used in the COALA-PG paper's IPD experiments."""
 
@@ -1004,6 +1525,85 @@ def make_coala_pg_agent(
     random_key = jax.random.PRNGKey(seed=seed)
 
     return CoalaPG(
+        network=network,
+        initial_hidden_state=initial_hidden_state,
+        optimizer=optimizer,
+        random_key=random_key,
+        gru_dim=gru_dim,
+        obs_spec=obs_spec,
+        num_envs=args.num_envs,
+        num_opps=args.num_opps,
+        num_minibatches=agent_args.num_minibatches,
+        num_epochs=agent_args.num_epochs,
+        num_inner_steps=args.num_inner_steps,
+        clip_value=agent_args.clip_value,
+        value_coeff=agent_args.value_coeff,
+        anneal_entropy=agent_args.anneal_entropy,
+        entropy_coeff_start=agent_args.entropy_coeff_start,
+        entropy_coeff_end=agent_args.entropy_coeff_end,
+        entropy_coeff_horizon=agent_args.entropy_coeff_horizon,
+        ppo_clipping_epsilon=agent_args.ppo_clipping_epsilon,
+        gamma=agent_args.gamma,
+        gae_lambda=agent_args.gae_lambda,
+        advantage_normalization=agent_args.get("advantage_normalization", True),
+        reward_rescaling=agent_args.get("reward_rescaling", 1.0),
+        player_id=player_id,
+    )
+
+
+def make_coala_pg_lagrangian_agent(
+    args,
+    agent_args,
+    obs_spec,
+    action_spec,
+    seed: int,
+    num_iterations: int,
+    player_id: int,
+):
+    """Build a Lagrangian COALA-PG shaper (two critic heads).
+
+    Identical to `make_coala_pg_agent` except for the network: the torso is the
+    same, with a second value readout for the constraint return.
+    """
+    if args.env_id in (
+        "iterated_matrix_game",
+        "iterated_tensor_game",
+        "iterated_nplayer_tensor_game",
+    ):
+        network, initial_hidden_state = make_coala_ipd_dual_value_network(
+            action_spec, agent_args.hidden_size
+        )
+    else:
+        raise NotImplementedError(
+            "Lagrangian COALA-PG has no network for "
+            f"env_id={args.env_id}. Implemented for iterated_matrix_game "
+            "(IPD); the coin_game network has a single value head."
+        )
+
+    gru_dim = initial_hidden_state.shape[1]
+
+    if agent_args.lr_scheduling:
+        scheduler = optax.linear_schedule(
+            init_value=agent_args.learning_rate,
+            end_value=0,
+            transition_steps=max(int(num_iterations), 1),
+        )
+        optimizer = optax.chain(
+            optax.clip_by_global_norm(agent_args.max_gradient_norm),
+            optax.scale_by_adam(eps=agent_args.adam_epsilon),
+            optax.scale_by_schedule(scheduler),
+            optax.scale(-1),
+        )
+    else:
+        optimizer = optax.chain(
+            optax.clip_by_global_norm(agent_args.max_gradient_norm),
+            optax.scale_by_adam(eps=agent_args.adam_epsilon),
+            optax.scale(-agent_args.learning_rate),
+        )
+
+    random_key = jax.random.PRNGKey(seed=seed)
+
+    return CoalaPGLagrangian(
         network=network,
         initial_hidden_state=initial_hidden_state,
         optimizer=optimizer,

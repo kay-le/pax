@@ -1,0 +1,176 @@
+# @package _global_
+
+# Lagrangian constrained-welfare COALA-PG vs paper-style naive A2C learner (IPD)
+#
+#   max_theta  W(theta)        s.t.  R_s(theta) >= tau
+#   L(theta, lam) = W + lam * (R_s - tau)
+#
+# Because the constraint is itself an expected return, the Lagrangian gradient
+# is the stock COALA-PG gradient of a reshaped reward:
+#
+#   r_mix = (r_s + r_o) + lam * r_s = (1 + lam) * r_s + r_o
+#
+# The learning-aware estimator (Algorithm 1), the rollout structure and the
+# co-player are all UNCHANGED from coala_pg_v_tabular.yaml. That is deliberate:
+# it makes the selfish / welfare / constrained comparison a statement about the
+# objective, not the optimizer.
+#
+# Dual update: PID Lagrangian (Stooke, Achiam & Abbeel, ICML 2020).
+# Setting kp = kd = 0 recovers RCPO (Tessler et al. 2019) dual ascent exactly,
+# so the dual-ascent baseline is this same file with two gains zeroed.
+
+# Agents
+agent1: 'CoalaPGLagrangian'
+agent2: 'CoalaA2C'
+
+# Environment
+env_id: iterated_matrix_game
+env_type: meta
+env_discount: 0.96
+payoff: [[-1, -1], [-3, 0], [0, -3], [-2, -2]]
+
+# Runner
+runner: coala_pg_lagrangian
+
+# Save
+save: True
+save_interval: 1000
+
+# Training (identical to coala_pg_v_tabular.yaml / the constrained ES runs)
+num_envs: 16           # B
+num_opps: 8
+num_outer_steps: 20    # M
+num_inner_steps: 10    # T
+num_iters: 3001
+num_devices: 1
+
+welfare:
+  # ---- the constraint ----
+  #
+  # tau is PER INNER EPISODE, so it can be read straight off the payoff matrix.
+  # At T=10 the per-episode range is -10 (all-CC) to -20 (all-DD).
+  #
+  # -20.0 is the shaper's SECURITY LEVEL: the mutual-defection payoff, i.e.
+  # what she can guarantee herself by refusing to shape at all. With tau at the
+  # security level the constraint is exactly the individual-rationality
+  # condition from cooperative game theory, and "self-sacrifice" becomes the
+  # well-defined event R_s < tau rather than an arbitrary threshold. That is
+  # the interpretable default and what the paper should report.
+  #
+  # Raise it (e.g. -17.5) only to ask the separate question "how much better
+  # than her security level can the shaper be made to do", and say so.
+  tau: -20.0
+
+  # ---- the constraint window ----
+  #
+  # 0 (or >= M) constrains the shaper's mean return over the WHOLE
+  # meta-episode. That can be satisfied by exploiting the co-player early and
+  # being exploited late, after it has converged -- the opposite of "shaping
+  # established cooperation". Setting this to K constrains only the last K
+  # inner episodes, making tau a statement about where the co-player ENDS UP.
+  # COALA-PG's estimator already credits rewards that appear only late in the
+  # meta-episode, so this costs nothing in the gradient.
+  #
+  # 5 of 20 episodes: the last quarter, after the naive A2C learner has had 15
+  # episodes to converge.
+  constraint_window: 5
+
+  # ---- PID dual update (Stooke et al. 2020) ----
+  #
+  # Tune kp FIRST with ki small and kd = 0; add kd only if lam still lags into
+  # violations. kp = kd = 0 gives exactly RCPO dual ascent with lr = ki, which
+  # is the baseline worth reporting alongside.
+  kp: 0.05      # proportional: reacts to the CURRENT violation
+  ki: 0.005     # integral: the dual-ascent term (the only one RCPO has)
+  kd: 0.1       # derivative: reacts to the violation GETTING WORSE
+  #
+  # lam_init > 0 on purpose. Early in meta-training the constraint is often
+  # satisfied by accident, so a lam starting at 0 only decays; by the time real
+  # violations appear the shaper has already learnt to sacrifice and lam must
+  # climb from nothing to undo it.
+  lam_init: 0.5
+  #
+  # null leaves lam unbounded (the textbook method). A finite cap bounds how
+  # far the objective can be tilted toward the shaper, at the cost of exact
+  # feasibility -- note that lam = 4 already means (1 + lam) = 5x weight on
+  # r_s, i.e. an essentially selfish objective.
+  lam_max: null
+  #
+  # COALA-PG meta-trajectory returns are noisy, and a derivative term on raw
+  # noise is mostly noise. 0.9 smooths the measurement the controller sees
+  # (not the one that is logged). Set to 0.0 to disable.
+  ema_beta: 0.9
+
+  # ---- ablation switch ----
+  #
+  # True freezes lam at lam_init, giving the STATIC weighted-welfare ablation
+  # r_mix = (1 + lam_init) * r_s + r_o. Worth running: a reviewer will ask
+  # whether a tuned constant weight does the same job. The argument for the
+  # constrained formulation is that a fixed weight either sacrifices or
+  # exploits depending on the game, while adaptive lam lands on the boundary
+  # in both -- which requires actually running this.
+  freeze_lam: False
+
+# COALA-PG shaper (agent1). Unchanged from coala_pg_v_tabular.yaml except that
+# the network carries a second value head (welfare, own-return).
+ppo1:
+  num_minibatches: 2
+  num_epochs: 4
+  # MUST be 1.0: Algorithm 1 applies discount = gamma*lambda uniformly, and
+  # any value < 1 attenuates the future-episode term (the learning-aware
+  # signal) by discount**T. Variance is controlled by the short horizon
+  # (M*T = 200), not by discounting. See pax/agents/coala_pg/coala_pg.py.
+  gamma: 1.0
+  gae_lambda: 1.0
+  advantage_normalization: False
+  reward_rescaling: 0.05
+  ppo_clipping_epsilon: 0.2
+  value_coeff: 0.5
+  clip_value: True
+  max_gradient_norm: 1.0
+  anneal_entropy: False
+  # NOTE: 0.0 means NO exploration bonus at all. The within-episode gradient
+  # points at defect immediately, so the policy can collapse before the
+  # learning-aware term becomes informative. Try 0.02 (as every other agent in
+  # this repo uses) if the shaper goes deterministic early.
+  entropy_coeff_start: 0.0
+  entropy_coeff_horizon: 2000000
+  entropy_coeff_end: 0.001
+  lr_scheduling: False
+  learning_rate: 0.0003
+  adam_epsilon: 1e-5
+  with_memory: True
+  with_cnn: False
+  hidden_size: 32
+
+# Naive co-player (agent2): A2C settings from Table 8 of the paper.
+ppo2:
+  num_minibatches: 1
+  num_epochs: 1
+  gamma: 0.99
+  gae_lambda: 1.0
+  advantage_normalization: True
+  reward_rescaling: 0.05
+  ppo_clipping_epsilon: 0.2
+  value_coeff: 0.5
+  clip_value: True
+  max_gradient_norm: 1.0
+  anneal_entropy: False
+  entropy_coeff_start: 0.0
+  entropy_coeff_horizon: 2000000
+  entropy_coeff_end: 0.001
+  lr_scheduling: False
+  learning_rate: 0.005
+  adam_epsilon: 1e-5
+  with_memory: True
+  with_cnn: False
+  hidden_size: 32
+
+# Logging setup
+wandb:
+  entity: "lichenqi-university-of-regina"
+  project: ipd
+  group: 'lagrangian-COALA-PG-${agent1}-vs-${agent2}'
+  name: run-seed-${seed}
+  log: True
+  mode: offline
