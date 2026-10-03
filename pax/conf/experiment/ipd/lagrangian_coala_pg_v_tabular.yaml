@@ -79,11 +79,27 @@ welfare:
   # exploit) and lam must climb from nothing to undo it.
   lam_init: 0.5
   #
-  # null leaves lam unbounded (the textbook method). A finite cap bounds how
-  # far the objective can be tilted toward one player, at the cost of exact
-  # feasibility -- note lam = 4 already means (1 + lam) = 5x weight on that
-  # player, i.e. the welfare term is effectively gone.
-  lam_max: null
+  # lam_max = 1.0 IS DERIVED FROM THE IPD PAYOFFS, NOT TUNED. The shaper's
+  # within-episode (myopic) preference under r_mix = (1+lam_s) r_s + (1+lam_o) r_o:
+  #
+  #   lam_s < 1 + 2*lam_o : cooperate at BOTH states  -> unconditional-C (sucker)
+  #   lam_s = 1 + 2*lam_o : r_mix identical for C and D at both states
+  #   lam_s > 1 + 2*lam_o : defect at BOTH states     -> always-D (selfish)
+  #
+  # No multiplier pair makes the myopic gradient prefer tit-for-tat. TFT comes
+  # ONLY from the learning-aware future-episode term. Plain welfare (lam=0) sits
+  # in the sucker region, which is why it lands on unconditional-C without
+  # exploration (measured: seed 1309, P(coop|CD)=0.98, shaper -24.5). Raising
+  # lam_s past 1 to fix that would drive the policy THROUGH the indifference
+  # point into the selfish region, and without exploration it collapses to
+  # always-D instead of TFT; the dual then oscillates between the two collapsed
+  # policies. Capping at the indifference point lets the dual neutralise the
+  # myopic "stay sucker" pull completely while never introducing a myopic
+  # "exploit" pull -- at the cap the ONLY gradient left is the learning-aware
+  # one, which is the one that knows TFT. 1.0 satisfies lam_s <= 1 + 2*lam_o
+  # for every lam_o >= 0. For a different payoff matrix re-derive it from
+  # (1+lam)(T - R) = R' - S'.
+  lam_max: 1.0
   #
   # COALA-PG meta-trajectory returns are noisy, and a derivative term on raw
   # noise is mostly noise. 0.9 smooths the measurement the controller sees
