@@ -53,13 +53,30 @@ Two modelling choices that matter more than the controller gains:
     has converged -- the opposite of "shaping established cooperation".
     ``window`` restricts a constraint to the last K inner episodes, making tau
     a statement about where the co-player ENDS UP.
-  * THE SCALE OF tau. Constraint returns are normalised to a PER-INNER-EPISODE
+  * THE SCALE OF v_ref. Constraint returns are normalised to a PER-INNER-EPISODE
     scale, so tau can be read straight off the payoff matrix (e.g. the
     mutual-defection payoff, which makes each constraint exactly the
     individual-rationality condition and "self-sacrifice" the well-defined
-    event R < tau). If the ES/Shaper runs define their floor on total
+    event R < v_ref). If the ES/Shaper runs define their floor on total
     meta-episode return instead, rescale one of them so the constraints mean
     the same thing on both optimizers.
+
+CONFIG. Flat `welfare.*` keys, with the reference values named exactly as in
+the constrained-welfare ES runner and the `coala_objective:
+constrained_welfare` configs, so one override sweeps a reference value and it
+means the same thing everywhere:
+
+    ++welfare.v_ref_shaper=-15 ++welfare.v_ref_opponent=-20
+
+Every other setting (`kp`, `ki`, `kd`, `lam_init`, `lam_max`, `ema_beta`,
+`constraint_window`) may be given once for both players or per player with a
+`_shaper` / `_opponent` suffix, the suffixed form winning:
+
+    ++welfare.ki=0.005                 # both
+    ++welfare.ki_opponent=0.002        # just the co-player's dual
+
+`++welfare.constrain_opponent=False` drops a constraint entirely, which is the
+ablation showing both constraints are load-bearing.
 """
 
 import os
@@ -71,15 +88,14 @@ import jax
 import jax.numpy as jnp
 import wandb
 
-from pax.runners.pid_lagrangian import PIDLagrangian
+from pax.runners.pid_lagrangian import (
+    PIDLagrangian,
+    parse_constraint_specs,
+)
 from pax.utils import MemoryState, TrainingState, save
 from pax.watchers import cg_visitation, ipd_visitation
 
 MAX_WANDB_CALLS = 1000
-
-# Which player's reward stream each constraint is written on.
-PLAYER_TO_INDEX = {"shaper": 0, "co-player": 1, "opponent": 1}
-
 
 class Sample(NamedTuple):
     """A batch of data.
@@ -134,67 +150,6 @@ def constraint_window_mask(
     return jnp.where(inside, num_outer_steps / float(window), 0.0).astype(dtype)
 
 
-def _parse_constraints(welfare_args, num_outer_steps):
-    """Read ``welfare.constraints`` into plain dicts, applying the defaults.
-
-    Each entry needs a ``player`` ("shaper" or "co-player") and a ``tau``;
-    everything else falls back to the top-level ``welfare`` value, so shared
-    PID gains need writing only once.
-    """
-    if "constraints" not in welfare_args:
-        raise ValueError(
-            "runner=coala_pg_lagrangian requires a `welfare.constraints` list "
-            "(one entry per individual-rationality constraint). See "
-            "pax/conf/experiment/ipd/lagrangian_coala_pg_v_tabular.yaml."
-        )
-    shared = {
-        "kp": float(welfare_args.get("kp", 0.0)),
-        "ki": float(welfare_args.get("ki", 0.01)),
-        "kd": float(welfare_args.get("kd", 0.0)),
-        "lam_init": float(welfare_args.get("lam_init", 0.5)),
-        "lam_max": welfare_args.get("lam_max", None),
-        "ema_beta": float(welfare_args.get("ema_beta", 0.0)),
-        "window": int(welfare_args.get("constraint_window", 0)),
-    }
-    parsed = []
-    for i, entry in enumerate(welfare_args.constraints):
-        if "player" not in entry or "tau" not in entry:
-            raise ValueError(
-                f"welfare.constraints[{i}] needs both `player` and `tau`; "
-                f"got keys {list(entry.keys())}."
-            )
-        player = str(entry.player)
-        if player not in PLAYER_TO_INDEX:
-            raise ValueError(
-                f"welfare.constraints[{i}].player must be one of "
-                f"{sorted(PLAYER_TO_INDEX)}; got '{player}'."
-            )
-        cfg = dict(shared)
-        for key in list(shared.keys()) + ["tau"]:
-            if key in entry:
-                cfg[key] = entry[key]
-        lam_max = cfg["lam_max"]
-        parsed.append(
-            {
-                "name": player,
-                "player_index": PLAYER_TO_INDEX[player],
-                "tau": float(cfg["tau"]),
-                "kp": float(cfg["kp"]),
-                "ki": float(cfg["ki"]),
-                "kd": float(cfg["kd"]),
-                "lam_init": float(cfg["lam_init"]),
-                "lam_max": (
-                    None
-                    if lam_max in (None, "null", "")
-                    else float(lam_max)
-                ),
-                "ema_beta": float(cfg["ema_beta"]),
-                "window": int(cfg["window"]),
-            }
-        )
-    return parsed
-
-
 class CoalaPGLagrangianRunner:
     """Trains a Lagrangian-constrained COALA-PG shaper against a learner."""
 
@@ -211,7 +166,10 @@ class CoalaPGLagrangianRunner:
         self.cg_stats = jax.jit(cg_visitation)
 
         num_outer_steps = args.num_outer_steps
-        self.constraints = _parse_constraints(args.welfare, num_outer_steps)
+        # Flat `welfare.*` keys, reference values named exactly as in the
+        # constrained-welfare ES / coala_objective configs
+        # (`v_ref_shaper`, `v_ref_opponent`) so a sweep override is one token.
+        self.constraints = parse_constraint_specs(args.welfare)
         self.num_constraints = len(self.constraints)
         self.controllers = [
             PIDLagrangian(
@@ -244,7 +202,7 @@ class CoalaPGLagrangianRunner:
         )
         self._window_masks = window_masks
         # Which reward stream each constraint reads.
-        player_index = tuple(c["player_index"] for c in self.constraints)
+        player_index = tuple(c["reward_index"] for c in self.constraints)
 
         # ---- VMAP env over num_envs, then num_opps ----
         env.batch_reset = jax.vmap(env.reset, (0, None), 0)
@@ -536,7 +494,10 @@ class CoalaPGLagrangianRunner:
                 if c["kp"] == 0 and c["kd"] == 0
                 else ""
             )
-            print(f"  [{c['name']}] tau={c['tau']:.4f}  window: {window}")
+            print(
+                f"  [{c['name']}] v_ref_{c['suffix']}={c['tau']:.4f}  "
+                f"window: {window}"
+            )
             print(
                 f"      kp={c['kp']} ki={c['ki']} kd={c['kd']} "
                 f"lam_init={c['lam_init']} lam_max={c['lam_max']} "
@@ -632,12 +593,12 @@ class CoalaPGLagrangianRunner:
                 w_s = 1.0 + sum(
                     lam_used_f[k]
                     for k, c in enumerate(self.constraints)
-                    if c["player_index"] == 0
+                    if c["reward_index"] == 0
                 )
                 w_o = 1.0 + sum(
                     lam_used_f[k]
                     for k, c in enumerate(self.constraints)
-                    if c["player_index"] == 1
+                    if c["reward_index"] == 1
                 )
                 print(
                     f"  weights     : (1+lam_s) = {w_s:.4f} on r_s | "

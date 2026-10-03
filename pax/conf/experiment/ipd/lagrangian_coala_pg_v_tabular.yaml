@@ -3,10 +3,16 @@
 # Lagrangian constrained-welfare COALA-PG vs paper-style naive A2C learner (IPD)
 #
 #   max_theta  W(theta)
-#   s.t.       R_s(theta) >= tau_s        (shaper individual rationality)
-#              R_o(theta) >= tau_o        (co-player individual rationality)
+#   s.t.       R_s(theta) >= v_ref_shaper      (shaper individual rationality)
+#              R_o(theta) >= v_ref_opponent    (co-player individual rationality)
 #
-#   L = W + lam_s * (R_s - tau_s) + lam_o * (R_o - tau_o)
+#   L = W + lam_s * (R_s - v_ref_shaper) + lam_o * (R_o - v_ref_opponent)
+#
+# Reference values use the SAME key names as the constrained-welfare ES runner
+# and the `coala_objective: constrained_welfare` configs, so sweeping one is a
+# single override and means the same thing across runners:
+#
+#   ++welfare.v_ref_shaper=-15 ++welfare.v_ref_opponent=-20
 #
 # TWO constraints, matching `runner_welfare_evo` (there: mu1/mu2 against
 # v_ref_shaper/v_ref_opponent). They do different jobs, which is why one is not
@@ -58,7 +64,7 @@ num_iters: 3001
 num_devices: 1
 
 welfare:
-  # ---- shared defaults; any constraint below may override any of these ----
+  # ---- shared settings; each may be overridden per player (see below) ----
   #
   # PID gains. Tune kp FIRST with ki small and kd = 0; add kd only if lam lags
   # into violations. kp = kd = 0 gives exactly RCPO dual ascent with lr = ki,
@@ -87,40 +93,56 @@ welfare:
   # CONSTRAINT WINDOW. 0 (or >= M) constrains a player's mean return over the
   # WHOLE meta-episode. That can be satisfied early and violated late, after
   # the co-player has converged -- the opposite of "shaping established
-  # cooperation". K constrains only the last K inner episodes, making tau a
+  # cooperation". K constrains only the last K inner episodes, making v_ref a
   # statement about where the co-player ENDS UP. COALA-PG's estimator already
   # credits rewards that appear only late, so this costs nothing in the
   # gradient. 5 of 20 = the last quarter, after the naive A2C learner has had
   # 15 episodes to converge.
   constraint_window: 5
 
-  # ---- the constraints themselves ----
+  # ---- reference values (the constraint floors) ----
   #
-  # One entry per individual-rationality condition. `player` is 'shaper' or
-  # 'co-player'; `tau` is PER INNER EPISODE, so it can be read straight off
-  # the payoff matrix. At T=10 the per-episode range is -10 (all-CC) to
-  # -20 (all-DD).
+  # Named exactly as in the constrained-welfare ES runner and the
+  # `coala_objective: constrained_welfare` configs, so one override sweeps a
+  # reference value and it means the same thing across runners:
+  #
+  #   ++welfare.v_ref_shaper=-15 ++welfare.v_ref_opponent=-20
+  #
+  # v_ref is PER INNER EPISODE, so it can be read straight off the payoff
+  # matrix. At T=10 the per-episode range is -10 (all-CC) to -20 (all-DD).
   #
   # -20.0 is each player's SECURITY LEVEL: the mutual-defection payoff, i.e.
-  # what they can guarantee by refusing to cooperate at all. With tau at the
+  # what they can guarantee by refusing to cooperate at all. With v_ref at the
   # security level each constraint is exactly the individual-rationality
   # condition from cooperative game theory, "self-sacrifice" is the
-  # well-defined event R_s < tau_s, and "exploitation" is R_o < tau_o. That is
-  # the interpretable default and what the paper should report.
+  # well-defined event R_s < v_ref_shaper, and "exploitation" is
+  # R_o < v_ref_opponent. That is the interpretable default and what the paper
+  # should report.
   #
   # Raise one (e.g. -17.5) only to ask the separate question "how much better
   # than its security level can this player be made to do", and say so.
+  v_ref_shaper: -20.0
+  v_ref_opponent: -20.0
+
+  # ---- dropping a constraint (ablation) ----
   #
-  # Per-constraint overrides are allowed, e.g. a slower dual on the co-player:
-  #   - player: co-player
-  #     tau: -20.0
-  #     ki: 0.002
-  #     window: 0
-  constraints:
-    - player: shaper
-      tau: -20.0
-    - player: co-player
-      tau: -20.0
+  # False removes that player's constraint entirely. Dropping the co-player's
+  # is the ablation showing both constraints are load-bearing: welfare is
+  # indifferent between (-10, -30) and (-30, -10), so with only the shaper's
+  # constraint the "cooperation" reached can be an exploitative split.
+  #
+  #   ++welfare.constrain_opponent=False
+  constrain_shaper: True
+  constrain_opponent: True
+
+  # ---- per-player overrides ----
+  #
+  # Every setting above may be given per player with a `_shaper` /
+  # `_opponent` suffix, which wins over the shared value. Nothing below needs
+  # setting unless you want the two duals to behave differently, e.g.
+  #
+  #   ki_opponent: 0.002            # slower dual on the co-player
+  #   constraint_window_shaper: 0   # shaper constrained over all M episodes
 
   # ---- ablation switch ----
   #

@@ -30,7 +30,124 @@ which is exactly RCPO dual ascent with step size ``ki``. That is intentional:
 the same code path provides the dual-ascent baseline for ablations.
 """
 
-from typing import Dict, Optional
+from typing import Any, Dict, List, Optional
+
+# The players a constraint can be written on, in the order their reward streams
+# appear in the environment's reward tuple. The config suffix is what a sweep
+# override uses (``++welfare.v_ref_shaper=-15``); the display name is what the
+# logs and wandb tags use.
+#
+#   (config suffix, display name, reward index, reference-value key)
+CONSTRAINT_PLAYERS = (
+    ("shaper", "shaper", 0, "v_ref_shaper"),
+    ("opponent", "co-player", 1, "v_ref_opponent"),
+)
+
+# Per-constraint settings. Each may be given once for both players
+# (``welfare.ki``) or per player (``welfare.ki_shaper``, ``welfare.ki_opponent``);
+# the suffixed form wins. `window` additionally accepts the shared spelling
+# `constraint_window`, to match the key name used by the ES configs.
+_CONSTRAINT_KEYS = (
+    "kp",
+    "ki",
+    "kd",
+    "lam_init",
+    "lam_max",
+    "ema_beta",
+    "window",
+)
+
+_DEFAULTS = {
+    "kp": 0.0,
+    "ki": 0.01,
+    "kd": 0.0,
+    "lam_init": 0.5,
+    "lam_max": None,
+    "ema_beta": 0.0,
+    "window": 0,
+}
+
+
+def _lookup(welfare_args, key: str, suffix: str, default: Any) -> Any:
+    """``<key>_<suffix>`` if present, else ``<key>``, else ``default``.
+
+    Lets a sweep override one player without touching the other, while shared
+    settings need writing only once.
+    """
+    for candidate in (f"{key}_{suffix}", key):
+        if candidate in welfare_args:
+            value = welfare_args[candidate]
+            if value is not None:
+                return value
+    return default
+
+
+def parse_constraint_specs(welfare_args) -> List[Dict[str, Any]]:
+    """Read the flat ``welfare.*`` keys into one spec dict per constraint.
+
+    Reference values use the SAME key names as the constrained-welfare ES and
+    `coala_objective: constrained_welfare` configs -- ``v_ref_shaper`` and
+    ``v_ref_opponent`` -- so a reference value can be swept with a single
+    override and means the same thing across runners:
+
+        ++welfare.v_ref_shaper=-15 ++welfare.v_ref_opponent=-20
+
+    A constraint can be dropped entirely with ``constrain_<player>: False``
+    (e.g. ``++welfare.constrain_opponent=False``), which is the ablation
+    showing both constraints are load-bearing.
+
+    Shared by the runner and by the agent factory, which needs the count to
+    size the critic -- so the two cannot disagree about how many heads exist.
+    """
+    specs = []
+    for suffix, name, reward_index, vref_key in CONSTRAINT_PLAYERS:
+        enabled = _lookup(welfare_args, "constrain", suffix, True)
+        if not bool(enabled):
+            continue
+        if vref_key not in welfare_args or welfare_args[vref_key] is None:
+            raise ValueError(
+                f"welfare.{vref_key} is required for the {name} constraint. "
+                f"Set it, or disable the constraint with "
+                f"welfare.constrain_{suffix}=False."
+            )
+        spec = {
+            "name": name,
+            "suffix": suffix,
+            "reward_index": reward_index,
+            "tau": float(welfare_args[vref_key]),
+        }
+        for key in _CONSTRAINT_KEYS:
+            value = _lookup(welfare_args, key, suffix, None)
+            if value is None and key == "window":
+                # `constraint_window` is the shared spelling used by the
+                # configs; fall back to it before the hard default.
+                value = _lookup(
+                    welfare_args, "constraint_window", suffix, None
+                )
+            if value is None:
+                value = _DEFAULTS[key]
+            if key == "lam_max":
+                spec[key] = (
+                    None if value in (None, "null", "") else float(value)
+                )
+            elif key == "window":
+                spec[key] = int(value)
+            else:
+                spec[key] = float(value)
+        specs.append(spec)
+
+    if not specs:
+        raise ValueError(
+            "Every constraint is disabled, so this is the unconstrained "
+            "welfare objective. Use agent1='CoalaPG' with "
+            "runner=coala_pg and coala_objective='welfare' instead."
+        )
+    return specs
+
+
+def num_constraints(welfare_args) -> int:
+    """How many constraints the flat config declares (sizes the critic)."""
+    return len(parse_constraint_specs(welfare_args))
 
 
 class PIDLagrangian:

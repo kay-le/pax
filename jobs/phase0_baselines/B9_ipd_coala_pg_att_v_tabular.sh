@@ -38,10 +38,12 @@ set -euo pipefail
 #   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline lagrangian_coala_pg_v_tabular ++welfare.freeze_lam=True ++welfare.lam_init=1.0
 #   # Constrain the whole meta-episode instead of the last K episodes.
 #   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline lagrangian_coala_pg_v_tabular ++welfare.constraint_window=0
-#   # Per-constraint tau (list index 0 = shaper, 1 = co-player).
-#   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline lagrangian_coala_pg_v_tabular ++welfare.constraints.0.tau=-17.5 ++welfare.constraints.1.tau=-20
+#   # Sweep the reference values -- same key names as the constrained configs.
+#   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline lagrangian_coala_pg_v_tabular ++welfare.v_ref_shaper=-17.5 ++welfare.v_ref_opponent=-20
 #   # DROP the co-player constraint, to show both constraints are needed.
-#   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline lagrangian_coala_pg_v_tabular '++welfare.constraints=[{player:shaper,tau:-20.0}]'
+#   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline lagrangian_coala_pg_v_tabular ++welfare.constrain_opponent=False
+#   # Per-player override: slower dual on the co-player only.
+#   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline lagrangian_coala_pg_v_tabular ++welfare.ki_opponent=0.002
 
 PLATFORM=${1:-tri}
 SEED=${2:-0}

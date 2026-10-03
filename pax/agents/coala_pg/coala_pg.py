@@ -84,6 +84,7 @@ import omegaconf
 import optax
 
 from pax import utils
+from pax.runners.pid_lagrangian import num_constraints as count_constraints
 from pax.agents.agent import AgentInterface
 from pax.agents.ppo.networks import (
     make_GRU_coingame_network,
@@ -1608,21 +1609,20 @@ def make_coala_pg_lagrangian_agent(
     Identical to `make_coala_pg_agent` except for the network: the torso is the
     same, with one extra value readout per constraint.
 
-    The number of constraints comes from ``args.welfare.constraints`` (the list
-    the runner also reads), defaulting to 2 -- the shaper's and the co-player's
-    individual-rationality conditions.
+    The critic is sized from the SAME parser the runner uses
+    (`pax.runners.pid_lagrangian.num_constraints`), so the two cannot disagree
+    about how many value heads exist. By default that is 2 -- the shaper's and
+    the co-player's individual-rationality conditions -- and
+    ``welfare.constrain_<player>: False`` drops one.
     """
     welfare_args = omegaconf.OmegaConf.select(args, "welfare", default=None)
-    if welfare_args is not None and "constraints" in welfare_args:
-        num_constraints = len(welfare_args.constraints)
-    else:
-        num_constraints = 2
-    if num_constraints < 1:
+    if welfare_args is None:
         raise ValueError(
-            "Lagrangian COALA-PG needs at least one constraint; got "
-            f"{num_constraints}. Use agent1='CoalaPG' with "
-            "coala_objective='welfare' for the unconstrained objective."
+            "Lagrangian COALA-PG needs a `welfare` config block with "
+            "v_ref_shaper / v_ref_opponent. See "
+            "pax/conf/experiment/ipd/lagrangian_coala_pg_v_tabular.yaml."
         )
+    num_constraints = count_constraints(welfare_args)
 
     if args.env_id in (
         "iterated_matrix_game",
