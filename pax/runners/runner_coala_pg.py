@@ -91,18 +91,52 @@ class CoalaPGRunner:
         agent1, agent2 = agents
         num_outer_steps = args.num_outer_steps
         coala_objective = args.get("coala_objective", "selfish")
-        if coala_objective not in ("selfish", "welfare", "constrained_welfare"):
+        if coala_objective not in (
+            "selfish",
+            "welfare",
+            "constrained_welfare",
+            "surrogate_constrained_welfare",
+        ):
             raise ValueError(
-                "coala_objective must be 'selfish', 'welfare', or "
-                "'constrained_welfare'. "
+                "coala_objective must be 'selfish', 'welfare', "
+                "'constrained_welfare', or 'surrogate_constrained_welfare'. "
                 f"Got {coala_objective}."
             )
+        if coala_objective in (
+            "constrained_welfare",
+            "surrogate_constrained_welfare",
+        ):
+            self.v_ref_shaper = float(args.welfare.v_ref_shaper)
+            self.v_ref_opponent = float(args.welfare.v_ref_opponent)
+            self.weight_ratio_max = float(
+                args.welfare.get("weight_ratio_max", 5.0)
+            )
+            self.weight_max = float(args.welfare.get("weight_max", 10.0))
+            self.weight_normalization = bool(
+                args.welfare.get("weight_normalization", True)
+            )
+            self.surrogate_alpha = float(args.welfare.get("surrogate_alpha", 1.0))
+            if args.welfare.get("calibration", False):
+                # ES implements this via `runner_welfare_evo.calibrate`; there
+                # is no equivalent here, and silently ignoring the flag would
+                # run with v_ref=0.0 instead of a calibrated reference.
+                raise NotImplementedError(
+                    "welfare.calibration is not implemented for runner=coala_pg. "
+                    "Set calibration: False and supply v_ref_shaper / "
+                    "v_ref_opponent explicitly."
+                )
+        else:
+            self.v_ref_shaper = 0.0
+            self.v_ref_opponent = 0.0
+            self.weight_ratio_max = 0.0
+            self.weight_max = 0.0
+            self.weight_normalization = False
+            self.surrogate_alpha = 0.0
+
         if coala_objective == "constrained_welfare":
             self.mu1 = float(args.welfare.mu1)
             self.mu2 = float(args.welfare.mu2)
             self.dual_lr = float(args.welfare.dual_lr)
-            self.v_ref_shaper = float(args.welfare.v_ref_shaper)
-            self.v_ref_opponent = float(args.welfare.v_ref_opponent)
             self.rho1 = float(args.welfare.rho1)
             self.rho2 = float(args.welfare.rho2)
             self.rho_multiplier = float(args.welfare.rho_schedule)
@@ -128,31 +162,13 @@ class CoalaPGRunner:
             # Three safeguards, all of which leave the unconstrained case
             # (mu=0, slack>=0 => w=(1,1)) bit-for-bit unchanged:
             self.mu_max = float(args.welfare.get("mu_max", 5.0))
-            self.weight_max = float(args.welfare.get("weight_max", 10.0))
-            self.weight_ratio_max = float(
-                args.welfare.get("weight_ratio_max", 3.0)
-            )
-            self.weight_normalization = bool(
-                args.welfare.get("weight_normalization", True)
-            )
             self.slack_per_episode = bool(
                 args.welfare.get("slack_per_episode", True)
             )
-            if args.welfare.get("calibration", False):
-                # ES implements this via `runner_welfare_evo.calibrate`; there
-                # is no equivalent here, and silently ignoring the flag would
-                # run with v_ref=0.0 instead of a calibrated reference.
-                raise NotImplementedError(
-                    "welfare.calibration is not implemented for runner=coala_pg. "
-                    "Set calibration: False and supply v_ref_shaper / "
-                    "v_ref_opponent explicitly."
-                )
         else:
             self.mu1 = 0.0
             self.mu2 = 0.0
             self.dual_lr = 0.0
-            self.v_ref_shaper = 0.0
-            self.v_ref_opponent = 0.0
             self.rho1 = 0.0
             self.rho2 = 0.0
             self.rho_multiplier = 1.0
@@ -161,9 +177,6 @@ class CoalaPGRunner:
             self.violation_counter_1 = 0
             self.violation_counter_2 = 0
             self.mu_max = 0.0
-            self.weight_max = 0.0
-            self.weight_ratio_max = 0.0
-            self.weight_normalization = False
             self.slack_per_episode = False
 
         weight_normalization = self.weight_normalization
@@ -373,7 +386,26 @@ class CoalaPGRunner:
             #
             # For a policy-gradient update, the return-dependent derivative is
             # an episode-wide reward weight: 1 + mu + rho * max(0, -s).
-            if coala_objective == "constrained_welfare":
+            if coala_objective == "surrogate_constrained_welfare":
+                slack_1 = ep_rewards_1.mean() - _objective_state[6]
+                slack_2 = ep_rewards_2.mean() - _objective_state[7]
+                alpha = _objective_state[10]
+
+                # Stateless constrained-welfare surrogate. When both
+                # constraints are satisfied this is exactly welfare; when one
+                # player falls below its threshold, that player's reward is
+                # emphasized without carrying dual/rho memory across updates.
+                w1 = 1.0 + alpha * jnp.maximum(0.0, -slack_1)
+                w2 = 1.0 + alpha * jnp.maximum(0.0, -slack_2)
+                if weight_normalization:
+                    ratio_cap = _objective_state[9]
+                    ratio = jnp.clip(w1 / w2, 1.0 / ratio_cap, ratio_cap)
+                    w1, w2 = ratio, jnp.ones_like(ratio)
+                else:
+                    weight_cap = _objective_state[8]
+                    w1 = jnp.minimum(w1, weight_cap)
+                    w2 = jnp.minimum(w2, weight_cap)
+            elif coala_objective == "constrained_welfare":
                 if slack_per_episode:
                     # Per-inner-episode slack, shape [M]. `runner_welfare_evo`
                     # evaluates the slack per population member, so its
@@ -437,7 +469,11 @@ class CoalaPGRunner:
             objective_rewards = (
                 _bcast(w1) * traj_1.rewards + _bcast(w2) * traj_2.rewards
             )
-            if coala_objective == "constrained_welfare" and weight_normalization:
+            if (
+                coala_objective
+                in ("constrained_welfare", "surrogate_constrained_welfare")
+                and weight_normalization
+            ):
                 # Keep the reward scale the critic regresses STATIONARY across
                 # iterations. Without this, every change in mu/rho rescales the
                 # whole reward stream, and `reward_rescaling` (a constant tuned
@@ -464,7 +500,12 @@ class CoalaPGRunner:
                 long_traj_1, obs1, a1_state, a1_mem
             )
             a1_metrics["coala/objective_is_welfare"] = jnp.asarray(
-                coala_objective in ("welfare", "constrained_welfare")
+                coala_objective
+                in (
+                    "welfare",
+                    "constrained_welfare",
+                    "surrogate_constrained_welfare",
+                )
             )
             a1_metrics["coala/objective_weight_player_1"] = objective_weights[0]
             a1_metrics["coala/objective_weight_player_2"] = objective_weights[1]
@@ -498,7 +539,7 @@ class CoalaPGRunner:
         coala_objective = self.args.get("coala_objective", "selfish")
         if coala_objective == "selfish":
             base_weights = [1.0, 0.0]
-        elif coala_objective == "welfare":
+        elif coala_objective in ("welfare", "surrogate_constrained_welfare"):
             base_weights = [1.0, 1.0]
         else:
             # Unused by the constrained branch of `_rollout`, which rebuilds
@@ -519,6 +560,7 @@ class CoalaPGRunner:
                 self.weight_ratio_max
                 if self.weight_ratio_max > 0.0
                 else jnp.inf,
+                self.surrogate_alpha,
             ]
         )
 
@@ -553,6 +595,20 @@ class CoalaPGRunner:
                 f"  weight_ratio_max: {self.weight_ratio_max} | "
                 f"weight_normalization: {self.weight_normalization} | "
                 f"slack_per_episode: {self.slack_per_episode}"
+            )
+        elif (
+            self.args.get("coala_objective", "selfish")
+            == "surrogate_constrained_welfare"
+        ):
+            print("Constrained welfare surrogate (stateless):")
+            print(
+                f"  v_ref: shaper {self.v_ref_shaper:.4f} | "
+                f"co-player {self.v_ref_opponent:.4f}"
+            )
+            print(
+                f"  surrogate_alpha: {self.surrogate_alpha} | "
+                f"weight_ratio_max: {self.weight_ratio_max} | "
+                f"weight_normalization: {self.weight_normalization}"
             )
 
         for i in range(num_iters):
@@ -649,18 +705,27 @@ class CoalaPGRunner:
                     f"co-player {mean_return_2:.4f} | "
                     f"welfare {mean_return_1 + mean_return_2:.4f}"
                 )
-                if self.args.get("coala_objective", "selfish") == "constrained_welfare":
+                if self.args.get("coala_objective", "selfish") in (
+                    "constrained_welfare",
+                    "surrogate_constrained_welfare",
+                ):
                     print(
-                        f"  constraints : mu_shaper {self.mu1:.4f} | "
-                        f"mu_co-player {self.mu2:.4f} | "
                         f"slack_shaper {slack_1:.4f} | "
-                        f"slack_co-player {slack_2:.4f} | "
-                        f"rho_shaper {self.rho1:.4f} | rho_co-player {self.rho2:.4f}"
+                        f"slack_co-player {slack_2:.4f}"
                     )
-                    # mu/rho above are POST-update (they take effect next
-                    # iteration); these are the weights that produced the
-                    # returns printed above. Printing only the former made the
-                    # two look inconsistent.
+                    if (
+                        self.args.get("coala_objective", "selfish")
+                        == "constrained_welfare"
+                    ):
+                        print(
+                            f"  lagrangian : mu_shaper {self.mu1:.4f} | "
+                            f"mu_co-player {self.mu2:.4f} | "
+                            f"rho_shaper {self.rho1:.4f} | "
+                            f"rho_co-player {self.rho2:.4f}"
+                        )
+                    # These are the weights that produced the returns printed
+                    # above; in the Lagrangian mode, mu/rho are post-update and
+                    # take effect on the next iteration.
                     print(
                         f"  weights     : w_shaper "
                         f"{float(objective_weights[0]):.4f} | "
@@ -719,11 +784,14 @@ class CoalaPGRunner:
                             "train/lagrangian/weight_ratio_max": (
                                 self.weight_ratio_max
                             ),
+                            "train/lagrangian/surrogate_alpha": (
+                                self.surrogate_alpha
+                            ),
                             "train/lagrangian/mu_at_cap_shaper": float(
-                                self.mu1 >= self.mu_max
+                                self.mu_max > 0.0 and self.mu1 >= self.mu_max
                             ),
                             "train/lagrangian/mu_at_cap_opponent": float(
-                                self.mu2 >= self.mu_max
+                                self.mu_max > 0.0 and self.mu2 >= self.mu_max
                             ),
                             "train/lagrangian/violation_counter_shaper": (
                                 self.violation_counter_1

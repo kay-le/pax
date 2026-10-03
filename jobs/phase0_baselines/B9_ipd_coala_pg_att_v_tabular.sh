@@ -24,13 +24,27 @@ set -euo pipefail
 #   bash B9_ipd_coala_pg_att_v_tabular.sh tri-debug 0
 #   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline welfare_coala_pg_v_tabular
 #   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline constrained_welfare_coala_pg_v_tabular
+#   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline surrogate_constrained_welfare_coala_pg_v_tabular
 #   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline constrained_welfare_coala_pg_v_tabular ++welfare.v_ref_shaper=-15 ++welfare.v_ref_opponent=-15
 
 PLATFORM=${1:-tri}
 SEED=${2:-0}
-WANDB_MODE_ARG=${3:-offline}
-EXPERIMENT_NAME=${4:-coala_pg_v_tabular}
-EXTRA_OVERRIDES=("${@:5}")
+# Backward-compatible argument parsing:
+#   <platform> <seed> <experiment>                  -> offline experiment
+#   <platform> <seed> <wandb_mode> <experiment>     -> explicit mode + experiment
+#   <platform> <seed> <wandb_mode> <experiment> ... -> plus Hydra overrides
+case "${3:-offline}" in
+    online|offline|shared|disabled|dryrun|run)
+        WANDB_MODE_ARG=${3:-offline}
+        EXPERIMENT_NAME=${4:-coala_pg_v_tabular}
+        EXTRA_OVERRIDES=("${@:5}")
+        ;;
+    *)
+        WANDB_MODE_ARG=offline
+        EXPERIMENT_NAME=${3:-coala_pg_v_tabular}
+        EXTRA_OVERRIDES=("${@:4}")
+        ;;
+esac
 
 # ──────────────────────────────────────────────────────────────────
 # Auto-submit: if not already running under SLURM, sbatch ourselves
