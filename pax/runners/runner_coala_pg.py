@@ -129,6 +129,9 @@ class CoalaPGRunner:
             # (mu=0, slack>=0 => w=(1,1)) bit-for-bit unchanged:
             self.mu_max = float(args.welfare.get("mu_max", 5.0))
             self.weight_max = float(args.welfare.get("weight_max", 10.0))
+            self.weight_ratio_max = float(
+                args.welfare.get("weight_ratio_max", 3.0)
+            )
             self.weight_normalization = bool(
                 args.welfare.get("weight_normalization", True)
             )
@@ -159,6 +162,7 @@ class CoalaPGRunner:
             self.violation_counter_2 = 0
             self.mu_max = 0.0
             self.weight_max = 0.0
+            self.weight_ratio_max = 0.0
             self.weight_normalization = False
             self.slack_per_episode = False
 
@@ -392,21 +396,31 @@ class CoalaPGRunner:
                 w2 = 1.0 + _objective_state[3] + _objective_state[5] * jnp.maximum(
                     0.0, -slack_2
                 )
-                if not weight_normalization:
-                    # `weight_max` exists only to bound the reward scale fed to
-                    # the critic. Normalization already does that exactly --
-                    # after dividing by the mean weight, w1 + w2 == 2
-                    # identically -- so capping BEFORE normalizing can only
-                    # distort the ratio, which is the whole informative content
-                    # of the Lagrangian direction. Worse, once both weights hit
-                    # the same cap the ratio collapses to 1:1 and every
-                    # per-episode and per-player distinction is erased.
-                    # Measured on IPD at v_ref=(-15,-15): w_shaper pinned at
-                    # exactly 10.0 (= weight_max) in every episode while
-                    # w_co-player sat at 8.6, and that run drifted into the
-                    # all-defect basin. So the cap applies only on the
-                    # un-normalized path, where it is still the sole protection
-                    # against an unbounded reward scale.
+                if weight_normalization:
+                    # Bound the RATIO, which is the only thing normalization
+                    # passes through to the policy. Two degenerate regimes were
+                    # measured on IPD at v_ref=(-15,-15), both of which delete
+                    # half the objective:
+                    #
+                    #   capping the raw weights at 10 -> both players pin at the
+                    #     cap, ratio -> 1:1, the penalty's per-episode and
+                    #     per-player information is erased and the objective is
+                    #     plain welfare (run drifted to the all-defect basin);
+                    #   no cap at all -> rho * max(0,-s) grows without bound in
+                    #     the violation, so a one-sided violation runs the ratio
+                    #     to 11:1 (w = 30.9 vs 2.75) and the objective is
+                    #     effectively selfish, welfare term gone.
+                    #
+                    # Clipping the ratio keeps both players materially present
+                    # while still letting the Lagrangian tilt between them. The
+                    # scale is handled downstream by normalization, so nothing
+                    # here can de-calibrate the critic.
+                    ratio_cap = _objective_state[9]
+                    ratio = jnp.clip(w1 / w2, 1.0 / ratio_cap, ratio_cap)
+                    w1, w2 = ratio, jnp.ones_like(ratio)
+                else:
+                    # Un-normalized path: `weight_max` is the only protection
+                    # against an unbounded reward scale reaching the critic.
                     weight_cap = _objective_state[8]
                     w1 = jnp.minimum(w1, weight_cap)
                     w2 = jnp.minimum(w2, weight_cap)
@@ -502,6 +516,9 @@ class CoalaPGRunner:
                 self.v_ref_shaper,
                 self.v_ref_opponent,
                 self.weight_max if self.weight_max > 0.0 else jnp.inf,
+                self.weight_ratio_max
+                if self.weight_ratio_max > 0.0
+                else jnp.inf,
             ]
         )
 
@@ -533,7 +550,7 @@ class CoalaPGRunner:
                 f"{self.rho_patience} violations, capped at {self.rho_max}"
             )
             print(
-                f"  weight_max: {self.weight_max} | "
+                f"  weight_ratio_max: {self.weight_ratio_max} | "
                 f"weight_normalization: {self.weight_normalization} | "
                 f"slack_per_episode: {self.slack_per_episode}"
             )
@@ -699,6 +716,9 @@ class CoalaPGRunner:
                             # than raising the cap.
                             "train/lagrangian/mu_max": self.mu_max,
                             "train/lagrangian/weight_max": self.weight_max,
+                            "train/lagrangian/weight_ratio_max": (
+                                self.weight_ratio_max
+                            ),
                             "train/lagrangian/mu_at_cap_shaper": float(
                                 self.mu1 >= self.mu_max
                             ),
@@ -717,10 +737,10 @@ class CoalaPGRunner:
                             "train/lagrangian/objective_weight_used_player_2": float(
                                 objective_weights[1]
                             ),
-                            "train/lagrangian/objective_weight_next_player_1": float(
+                            "train/lagrangian/base_weight_next_player_1": float(
                                 next_objective_state[0]
                             ),
-                            "train/lagrangian/objective_weight_next_player_2": float(
+                            "train/lagrangian/base_weight_next_player_2": float(
                                 next_objective_state[1]
                             ),
                         }

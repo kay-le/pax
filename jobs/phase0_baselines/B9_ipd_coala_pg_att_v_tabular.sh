@@ -6,7 +6,7 @@ set -euo pipefail
 # learning-aware policy gradients", ICLR 2025 (arXiv:2410.18636).
 #
 # Usage:
-#   bash B9_ipd_coala_pg_att_v_tabular.sh <platform> <seed> [wandb_mode] [experiment]
+#   bash B9_ipd_coala_pg_att_v_tabular.sh <platform> <seed> [wandb_mode] [experiment] [hydra_overrides...]
 #
 # Platforms:
 #   fir        — Fir cluster, 1×H100 MIG slice
@@ -24,11 +24,13 @@ set -euo pipefail
 #   bash B9_ipd_coala_pg_att_v_tabular.sh tri-debug 0
 #   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline welfare_coala_pg_v_tabular
 #   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline constrained_welfare_coala_pg_v_tabular
+#   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline constrained_welfare_coala_pg_v_tabular ++welfare.v_ref_shaper=-15 ++welfare.v_ref_opponent=-15
 
 PLATFORM=${1:-tri}
 SEED=${2:-0}
 WANDB_MODE_ARG=${3:-offline}
 EXPERIMENT_NAME=${4:-coala_pg_v_tabular}
+EXTRA_OVERRIDES=("${@:5}")
 
 # ──────────────────────────────────────────────────────────────────
 # Auto-submit: if not already running under SLURM, sbatch ourselves
@@ -111,6 +113,9 @@ mkdir -p "$RESULTS_DIR"
 
 start_time=$(date +%s)
 echo "=== B9 COALA-PG | Experiment: $EXPERIMENT_NAME | Platform: $PLATFORM | Seed: $SEED | wandb: $WANDB_MODE_ARG | $(date '+%Y-%m-%d %H:%M:%S') ==="
+if [ ${#EXTRA_OVERRIDES[@]} -gt 0 ]; then
+    echo "=== Extra Hydra overrides: ${EXTRA_OVERRIDES[*]} ==="
+fi
 
 cd /project/def-jtyao/lichenqi/pax
 
@@ -121,7 +126,8 @@ case "$PLATFORM" in
         python -m pax.experiment +experiment/$EXPERIMENT \
             seed=$SEED \
             ++wandb.mode=$WANDB_MODE_ARG \
-            hydra.run.dir=$HYDRA_DIR
+            hydra.run.dir=$HYDRA_DIR \
+            "${EXTRA_OVERRIDES[@]}"
         ;;
     tri-debug|fir-debug)
         # Smoke test only: tiny M / T / B. These settings are far too small for
@@ -138,19 +144,54 @@ case "$PLATFORM" in
             ++ppo1.num_minibatches=4 \
             ++save_interval=5 \
             ++wandb.mode=$WANDB_MODE_ARG \
-            hydra.run.dir=$HYDRA_DIR
+            hydra.run.dir=$HYDRA_DIR \
+            "${EXTRA_OVERRIDES[@]}"
         ;;
 esac
 
 # ──────────────────────────────────────────────────────────────────
 # Copy results to persistent storage
 # ──────────────────────────────────────────────────────────────────
+# Hydra writes checkpoints to  $EXP_OUTPUT/<wandb.group>/<wandb.name>/<timestamp>/
+# (save_dir is "./exp/${wandb.group}/${wandb.name}" in pax/conf/config.yaml), and
+# wandb.group differs per experiment: "baseline-COALA-PG-*" for the selfish
+# baseline, "constrained-welfare-COALA-PG-*" for the constrained variant, etc.
+# The old hardcoded "baseline-COALA-PG-*" glob silently matched nothing for
+# every experiment but coala_pg_v_tabular. Copy whatever group dirs exist, and
+# FAIL LOUDLY: both copies used to hide errors behind 2>/dev/null plus
+# "|| true", so a no-match printed a success message anyway.
+shopt -s nullglob
+
 echo "Copying final results to $RESULTS_DIR ..."
-cp -rL "$EXP_OUTPUT"/baseline-COALA-PG-*/ "$RESULTS_DIR/" 2>/dev/null
+group_dirs=("$EXP_OUTPUT"/*/)
+if [ ${#group_dirs[@]} -eq 0 ]; then
+    echo "WARNING: no run directories under $EXP_OUTPUT � nothing to copy." >&2
+    echo "         (expected $EXP_OUTPUT/<wandb.group>/<wandb.name>/<timestamp>/)" >&2
+else
+    for d in "${group_dirs[@]}"; do
+        echo "  <- $d"
+        cp -rL "$d" "$RESULTS_DIR/" || echo "WARNING: copy failed for $d" >&2
+    done
+    echo "Results now in $RESULTS_DIR:"
+    ls -1 "$RESULTS_DIR"
+fi
+
 if [ "$WANDB_MODE_ARG" = "offline" ]; then
-    mkdir -p /scratch/lichenqi/wandb_saved
-    cp -rL "$WANDB_DIR"/wandb/offline-run-* /scratch/lichenqi/wandb_saved/ 2>/dev/null || true
-    echo ">>> Sync later from a LOGIN node: wandb sync /scratch/lichenqi/wandb_saved/offline-run-* <<<"
+    WANDB_SAVED=/scratch/lichenqi/wandb_saved
+    mkdir -p "$WANDB_SAVED"
+    # wandb appends its own "wandb/" under WANDB_DIR, hence the doubled path.
+    offline_runs=("$WANDB_DIR"/wandb/offline-run-*)
+    if [ ${#offline_runs[@]} -eq 0 ]; then
+        echo "WARNING: no offline-run-* under $WANDB_DIR/wandb � nothing to sync." >&2
+        echo "         Contents of $WANDB_DIR:" >&2
+        ls -lR "$WANDB_DIR" 2>&1 | head -40 >&2
+    else
+        for r in "${offline_runs[@]}"; do
+            echo "  <- $r"
+            cp -rL "$r" "$WANDB_SAVED/" || echo "WARNING: copy failed for $r" >&2
+        done
+        echo ">>> Sync later from a LOGIN node: wandb sync $WANDB_SAVED/offline-run-* <<<"
+    fi
 fi
 
 end_time=$(date +%s)
