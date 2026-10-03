@@ -79,27 +79,30 @@ welfare:
   # exploit) and lam must climb from nothing to undo it.
   lam_init: 0.5
   #
-  # lam_max = 1.0 IS DERIVED FROM THE IPD PAYOFFS, NOT TUNED. The shaper's
+  # lam_max IS DERIVED FROM THE IPD PAYOFFS, NOT TUNED. The shaper's
   # within-episode (myopic) preference under r_mix = (1+lam_s) r_s + (1+lam_o) r_o:
   #
   #   lam_s < 1 + 2*lam_o : cooperate at BOTH states  -> unconditional-C (sucker)
-  #   lam_s = 1 + 2*lam_o : r_mix identical for C and D at both states
+  #   lam_s = 1 + 2*lam_o : r_mix identical for C and D -> no myopic force at all
   #   lam_s > 1 + 2*lam_o : defect at BOTH states     -> always-D (selfish)
   #
-  # No multiplier pair makes the myopic gradient prefer tit-for-tat. TFT comes
-  # ONLY from the learning-aware future-episode term. Plain welfare (lam=0) sits
+  # No multiplier pair makes the myopic gradient prefer tit-for-tat; TFT comes
+  # ONLY from the learning-aware future-episode term. Plain welfare (lam=0) is
   # in the sucker region, which is why it lands on unconditional-C without
-  # exploration (measured: seed 1309, P(coop|CD)=0.98, shaper -24.5). Raising
-  # lam_s past 1 to fix that would drive the policy THROUGH the indifference
-  # point into the selfish region, and without exploration it collapses to
-  # always-D instead of TFT; the dual then oscillates between the two collapsed
-  # policies. Capping at the indifference point lets the dual neutralise the
-  # myopic "stay sucker" pull completely while never introducing a myopic
-  # "exploit" pull -- at the cap the ONLY gradient left is the learning-aware
-  # one, which is the one that knows TFT. 1.0 satisfies lam_s <= 1 + 2*lam_o
-  # for every lam_o >= 0. For a different payoff matrix re-derive it from
-  # (1+lam)(T - R) = R' - S'.
-  lam_max: 1.0
+  # exploration (measured 4/4 seeds, P(coop|CD) ~ 0.98).
+  #
+  # Why 1.5 and not 1.0 (the indifference point): at exactly 1.0 the dual
+  # cancels welfare's pull toward sucker but applies NO push out of it, so a
+  # policy that saturated as sucker before lam_s got there stays frozen.
+  # Measured at v_ref=-15, cap 1.0, 3 seeds: shaper -27/-27/-22 with lam_s
+  # pinned at 1.0 and the policy ~90% in the CD (sucker) state. 1.5 gives a
+  # +0.5/step myopic push toward D, enough to evict the policy from the sucker
+  # basin; the anti-windup in `pid_lagrangian.py` then lets lam_s fall back
+  # under indifference within ~30 iterations once the shaper's constraint is
+  # met, so the push is transient and cannot carry the policy all the way to
+  # always-D. For a different payoff matrix re-derive the indifference point
+  # from (1+lam)(T - R) = R' - S' and set the cap a little above it.
+  lam_max: 1.5
   #
   # COALA-PG meta-trajectory returns are noisy, and a derivative term on raw
   # noise is mostly noise. 0.9 smooths the measurement the controller sees
@@ -203,11 +206,18 @@ ppo1:
   clip_value: True
   max_gradient_norm: 1.0
   anneal_entropy: False
-  # NOTE: 0.0 means NO exploration bonus at all. The within-episode gradient
-  # points at defect immediately, so the policy can collapse before the
-  # learning-aware term becomes informative. Try 0.02 (as every other agent in
-  # this repo uses) if the shaper goes deterministic early.
-  entropy_coeff_start: 0.0
+  # 0.02 matches every other shaper agent in this repo (all ~30 Shaper / M-FOS
+  # / GS / welfare-shaper IPD configs), which is what makes these numbers
+  # comparable to the ES runs. It DEPARTS from the COALA-PG paper's Table 8
+  # value of 0.0, deliberately: at 0.0 the softmax saturates and the policy
+  # dies -- measured P(coop) = 0.000 exactly at every state, so there is no
+  # gradient left for welfare, for the constraint, or for the learning-aware
+  # term to act on (seeds 1309/1400, and the v_ref=-15 sweep).
+  #
+  # It must be IDENTICAL in the welfare baseline and here. Lowering it to make
+  # the baseline fail would rig the comparison; holding it fixed is what lets
+  # a difference in outcome be attributed to the objective.
+  entropy_coeff_start: 0.02
   entropy_coeff_horizon: 2000000
   entropy_coeff_end: 0.001
   lr_scheduling: False

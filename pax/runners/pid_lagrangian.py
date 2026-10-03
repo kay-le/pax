@@ -225,7 +225,24 @@ class PIDLagrangian:
         # Integral: the dual-ascent term. Clamped at zero so a long stretch of
         # satisfied constraint cannot bank negative multiplier "credit" that
         # would delay the response to the next violation.
-        self._integral = max(0.0, self._integral + self.ki * delta)
+        #
+        # ANTI-WINDUP: also bound it ABOVE by lam_max. Without this the
+        # integrator keeps accumulating while lam is already saturated at the
+        # cap, so lam becomes a function of training HISTORY rather than of the
+        # current violation, and cannot come down when the constraint is met.
+        # Measured on IPD (seed 1402): I reached 43.9 with lam pinned at 1.0 --
+        # draining that at ki*|slack| would take ~1750 iterations, longer than
+        # the run. A second run (seed 1400) sat at lam_s = 1.0 purely on
+        # leftover windup while its constraint was satisfied by 4.6, which also
+        # drove BOTH multipliers to the cap at once: weights (2, 2) is just
+        # 2 x welfare, and under Adam that is plain welfare, so the constraints
+        # supplied no differential signal at all. Bounding the integrator is
+        # standard PID practice and is what the OmniSafe PIDLagrangian
+        # reference implementation does.
+        hi = float("inf") if self.lam_max is None else self.lam_max
+        self._integral = min(
+            hi, max(0.0, self._integral + self.ki * delta)
+        )
 
         # Derivative on the COST, i.e. positive when the return is falling.
         # One-sided: we want lam to anticipate a developing violation, but not
