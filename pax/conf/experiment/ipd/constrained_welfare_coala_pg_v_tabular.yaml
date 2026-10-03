@@ -1,0 +1,109 @@
+# @package _global_
+
+# Constrained-welfare COALA-PG vs paper-style naive A2C learner (IPD)
+#
+# Same implementation and hyperparameters as coala_pg_v_tabular.yaml, except
+# agent1's COALA-PG objective is the Lagrangian welfare objective:
+#   r_1 + r_2 + mu_1 * (r_1 - v_ref_shaper)
+#             + mu_2 * (r_2 - v_ref_opponent)
+#             - rho_k/2 * max(0, v_ref_k - r_k)^2
+# The constants and augmented-penalty derivative are folded into per-player
+# reward weights, while mu and rho follow the same update rules as the
+# constrained welfare ES runner.
+
+# Agents
+agent1: 'CoalaPG'
+agent2: 'CoalaA2C'
+
+# Environment
+env_id: iterated_matrix_game
+env_type: meta
+env_discount: 0.96
+payoff: [[-1, -1], [-3, 0], [0, -3], [-2, -2]]
+
+# Runner
+runner: coala_pg
+coala_objective: constrained_welfare
+
+# Save
+save: True
+save_interval: 1000
+
+# Training
+num_envs: 16           # B
+num_opps: 8
+num_outer_steps: 20    # M
+num_inner_steps: 10    # T
+num_iters: 3001
+num_devices: 1
+
+# Constrained welfare settings. With T=10, mutual defection is roughly -20 per
+# episode, matching the old T=100 baseline reference of -200 after rescaling by
+# horizon length.
+welfare:
+  rho1: 1.0
+  rho2: 1.0
+  rho_schedule: 1.5
+  rho_patience: 30
+  rho_max: 50
+  mu1: 0.0
+  mu2: 0.0
+  dual_lr: 0.002
+  calibration: False
+  v_ref_shaper: -20.0
+  v_ref_opponent: -20.0
+
+# COALA-PG shaper (agent1), constrained welfare objective.
+ppo1:
+  num_minibatches: 2
+  num_epochs: 4
+  gamma: 1.0
+  gae_lambda: 1.0
+  advantage_normalization: False
+  reward_rescaling: 0.05
+  ppo_clipping_epsilon: 0.2
+  value_coeff: 0.5
+  clip_value: True
+  max_gradient_norm: 1.0
+  anneal_entropy: False
+  entropy_coeff_start: 0.0
+  entropy_coeff_horizon: 2000000
+  entropy_coeff_end: 0.001
+  lr_scheduling: False
+  learning_rate: 0.0003
+  adam_epsilon: 1e-5
+  with_memory: True
+  with_cnn: False
+  hidden_size: 32
+
+# Naive co-player (agent2): A2C settings from Table 8 of the paper.
+ppo2:
+  num_minibatches: 1
+  num_epochs: 1
+  gamma: 0.99
+  gae_lambda: 1.0
+  advantage_normalization: True
+  reward_rescaling: 0.05
+  ppo_clipping_epsilon: 0.2
+  value_coeff: 0.5
+  clip_value: True
+  max_gradient_norm: 1.0
+  anneal_entropy: False
+  entropy_coeff_start: 0.0
+  entropy_coeff_horizon: 2000000
+  entropy_coeff_end: 0.001
+  lr_scheduling: False
+  learning_rate: 0.005
+  adam_epsilon: 1e-5
+  with_memory: True
+  with_cnn: False
+  hidden_size: 32
+
+# Logging setup
+wandb:
+  entity: "lichenqi-university-of-regina"
+  project: ipd
+  group: 'constrained-welfare-COALA-PG-${agent1}-vs-${agent2}'
+  name: run-seed-${seed}
+  log: True
+  mode: offline

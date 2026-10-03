@@ -91,11 +91,38 @@ class CoalaPGRunner:
         agent1, agent2 = agents
         num_outer_steps = args.num_outer_steps
         coala_objective = args.get("coala_objective", "selfish")
-        if coala_objective not in ("selfish", "welfare"):
+        if coala_objective not in ("selfish", "welfare", "constrained_welfare"):
             raise ValueError(
-                "coala_objective must be 'selfish' or 'welfare'. "
+                "coala_objective must be 'selfish', 'welfare', or "
+                "'constrained_welfare'. "
                 f"Got {coala_objective}."
             )
+        if coala_objective == "constrained_welfare":
+            self.mu1 = float(args.welfare.mu1)
+            self.mu2 = float(args.welfare.mu2)
+            self.dual_lr = float(args.welfare.dual_lr)
+            self.v_ref_shaper = float(args.welfare.v_ref_shaper)
+            self.v_ref_opponent = float(args.welfare.v_ref_opponent)
+            self.rho1 = float(args.welfare.rho1)
+            self.rho2 = float(args.welfare.rho2)
+            self.rho_multiplier = float(args.welfare.rho_schedule)
+            self.rho_patience = int(args.welfare.rho_patience)
+            self.rho_max = float(args.welfare.rho_max)
+            self.violation_counter_1 = 0
+            self.violation_counter_2 = 0
+        else:
+            self.mu1 = 0.0
+            self.mu2 = 0.0
+            self.dual_lr = 0.0
+            self.v_ref_shaper = 0.0
+            self.v_ref_opponent = 0.0
+            self.rho1 = 0.0
+            self.rho2 = 0.0
+            self.rho_multiplier = 1.0
+            self.rho_patience = 0
+            self.rho_max = 0.0
+            self.violation_counter_1 = 0
+            self.violation_counter_2 = 0
 
         # ---- agent 1 (COALA-PG shaper): batched over num_opps ----
         agent1.batch_init = jax.vmap(
@@ -237,6 +264,7 @@ class CoalaPGRunner:
             _a2_state: TrainingState,
             _a2_mem: MemoryState,
             _env_params: Any,
+            _objective_state: jnp.ndarray,
         ):
             """One meta-trajectory: M inner episodes against a fresh co-player."""
             rngs = jnp.concatenate(
@@ -286,26 +314,48 @@ class CoalaPGRunner:
             ) = vals
             traj_1, traj_2, a2_metrics = stack
 
+            # Per-episode returns: [M, num_opps, num_envs] -> [M]
+            ep_rewards_1 = traj_1.rewards.sum(axis=1).mean(axis=(1, 2))
+            ep_rewards_2 = traj_2.rewards.sum(axis=1).mean(axis=(1, 2))
+
             # COALA-PG update over the whole meta-trajectory. The standard
-            # paper baseline is selfish (`r_1`). The welfare variant changes
-            # only the optimizer objective to utilitarian welfare (`r_1+r_2`).
-            if coala_objective == "welfare":
-                objective_traj_1 = traj_1._replace(
-                    rewards=traj_1.rewards + traj_2.rewards
+            # paper baseline is selfish (`r_1`). Welfare modes change only the
+            # optimizer objective reward stream; evaluation/logging keeps the
+            # true individual rewards. The constrained welfare mode mirrors the
+            # augmented Lagrangian used by `runner_welfare_evo`:
+            #
+            #   W + mu*s - rho/2 * max(0, -s)^2
+            #
+            # For a policy-gradient update, the return-dependent derivative is
+            # an episode-wide reward weight: 1 + mu + rho * max(0, -s).
+            objective_weights = _objective_state[:2]
+            if coala_objective == "constrained_welfare":
+                slack_1 = ep_rewards_1.mean() - _objective_state[6]
+                slack_2 = ep_rewards_2.mean() - _objective_state[7]
+                objective_weights = jnp.asarray(
+                    [
+                        1.0
+                        + _objective_state[2]
+                        + _objective_state[4] * jnp.maximum(0.0, -slack_1),
+                        1.0
+                        + _objective_state[3]
+                        + _objective_state[5] * jnp.maximum(0.0, -slack_2),
+                    ]
                 )
-            else:
-                objective_traj_1 = traj_1
+            objective_rewards = (
+                objective_weights[0] * traj_1.rewards
+                + objective_weights[1] * traj_2.rewards
+            )
+            objective_traj_1 = traj_1._replace(rewards=objective_rewards)
             long_traj_1 = to_long_trajectory(objective_traj_1)
             a1_state, a1_mem, a1_metrics = agent1.update(
                 long_traj_1, obs1, a1_state, a1_mem
             )
             a1_metrics["coala/objective_is_welfare"] = jnp.asarray(
-                coala_objective == "welfare"
+                coala_objective in ("welfare", "constrained_welfare")
             )
-
-            # Per-episode returns: [M, num_opps, num_envs] -> [M]
-            ep_rewards_1 = traj_1.rewards.sum(axis=1).mean(axis=(1, 2))
-            ep_rewards_2 = traj_2.rewards.sum(axis=1).mean(axis=(1, 2))
+            a1_metrics["coala/objective_weight_player_1"] = objective_weights[0]
+            a1_metrics["coala/objective_weight_player_2"] = objective_weights[1]
 
             if args.env_id == "iterated_matrix_game":
                 env_stats = jax.tree_util.tree_map(
@@ -327,9 +377,31 @@ class CoalaPGRunner:
                 a2_state,
                 a2_mem,
                 a2_metrics,
+                objective_weights,
             )
 
         self.rollout = jax.jit(_rollout)
+
+    def _objective_state(self) -> jnp.ndarray:
+        coala_objective = self.args.get("coala_objective", "selfish")
+        if coala_objective == "selfish":
+            base_weights = [1.0, 0.0]
+        elif coala_objective == "welfare":
+            base_weights = [1.0, 1.0]
+        else:
+            base_weights = [1.0 + self.mu1, 1.0 + self.mu2]
+        return jnp.asarray(
+            [
+                base_weights[0],
+                base_weights[1],
+                self.mu1,
+                self.mu2,
+                self.rho1,
+                self.rho2,
+                self.v_ref_shaper,
+                self.v_ref_opponent,
+            ]
+        )
 
     def run_loop(self, env_params, agents, num_iters, watchers):
         print("Training COALA-PG")
@@ -350,6 +422,7 @@ class CoalaPGRunner:
 
         for i in range(num_iters):
             rng, rng_run = jax.random.split(rng, 2)
+            objective_state = self._objective_state()
             (
                 env_stats,
                 ep_rewards_1,
@@ -360,9 +433,47 @@ class CoalaPGRunner:
                 a2_state,
                 a2_mem,
                 a2_metrics,
+                objective_weights,
             ) = self.rollout(
-                rng_run, a1_state, a1_mem, a2_state, a2_mem, env_params
+                rng_run,
+                a1_state,
+                a1_mem,
+                a2_state,
+                a2_mem,
+                env_params,
+                objective_state,
             )
+            mean_return_1 = float(ep_rewards_1.mean())
+            mean_return_2 = float(ep_rewards_2.mean())
+            slack_1 = mean_return_1 - self.v_ref_shaper
+            slack_2 = mean_return_2 - self.v_ref_opponent
+
+            if self.args.get("coala_objective", "selfish") == "constrained_welfare":
+                self.mu1 = max(0.0, self.mu1 - self.dual_lr * slack_1)
+                self.mu2 = max(0.0, self.mu2 - self.dual_lr * slack_2)
+
+                if mean_return_1 < self.v_ref_shaper:
+                    self.violation_counter_1 += 1
+                else:
+                    self.violation_counter_1 = 0
+                if mean_return_2 < self.v_ref_opponent:
+                    self.violation_counter_2 += 1
+                else:
+                    self.violation_counter_2 = 0
+
+                if self.violation_counter_1 >= self.rho_patience:
+                    self.rho1 = min(self.rho1 * self.rho_multiplier, self.rho_max)
+                    self.violation_counter_1 = 0
+                    print(
+                        f"[Lagrangian] rho1 (shaper) increased to {self.rho1:.4f}"
+                    )
+                if self.violation_counter_2 >= self.rho_patience:
+                    self.rho2 = min(self.rho2 * self.rho_multiplier, self.rho_max)
+                    self.violation_counter_2 = 0
+                    print(
+                        f"[Lagrangian] rho2 (opponent) increased to {self.rho2:.4f}"
+                    )
+            next_objective_state = self._objective_state()
 
             if i % self.args.save_interval == 0:
                 log_savepath = os.path.join(self.save_dir, f"iteration_{i}")
@@ -387,10 +498,18 @@ class CoalaPGRunner:
                     f"shaper {last_1:.4f} | co-player {last_2:.4f}"
                 )
                 print(
-                    f"  meta-mean   : shaper {float(ep_rewards_1.mean()):.4f} | "
-                    f"co-player {float(ep_rewards_2.mean()):.4f} | "
-                    f"welfare {float(ep_rewards_1.mean() + ep_rewards_2.mean()):.4f}"
+                    f"  meta-mean   : shaper {mean_return_1:.4f} | "
+                    f"co-player {mean_return_2:.4f} | "
+                    f"welfare {mean_return_1 + mean_return_2:.4f}"
                 )
+                if self.args.get("coala_objective", "selfish") == "constrained_welfare":
+                    print(
+                        f"  constraints : mu_shaper {self.mu1:.4f} | "
+                        f"mu_co-player {self.mu2:.4f} | "
+                        f"slack_shaper {slack_1:.4f} | "
+                        f"slack_co-player {slack_2:.4f} | "
+                        f"rho_shaper {self.rho1:.4f} | rho_co-player {self.rho2:.4f}"
+                    )
                 for stat, val in env_stats.items():
                     print(f"  {stat}: {float(val)}")
                 print()
@@ -426,6 +545,32 @@ class CoalaPGRunner:
                             # Shaping signal: how much the co-player's return
                             # improved from the first to the last inner episode.
                             "train/shaping_delta/player_2": last_2 - first_2,
+                            "train/lagrangian/mu_shaper": self.mu1,
+                            "train/lagrangian/mu_opponent": self.mu2,
+                            "train/lagrangian/v_ref_shaper": self.v_ref_shaper,
+                            "train/lagrangian/v_ref_opponent": self.v_ref_opponent,
+                            "train/lagrangian/slack_shaper": slack_1,
+                            "train/lagrangian/slack_opponent": slack_2,
+                            "train/lagrangian/rho_shaper": self.rho1,
+                            "train/lagrangian/rho_opponent": self.rho2,
+                            "train/lagrangian/violation_counter_shaper": (
+                                self.violation_counter_1
+                            ),
+                            "train/lagrangian/violation_counter_opponent": (
+                                self.violation_counter_2
+                            ),
+                            "train/lagrangian/objective_weight_used_player_1": float(
+                                objective_weights[0]
+                            ),
+                            "train/lagrangian/objective_weight_used_player_2": float(
+                                objective_weights[1]
+                            ),
+                            "train/lagrangian/objective_weight_next_player_1": float(
+                                next_objective_state[0]
+                            ),
+                            "train/lagrangian/objective_weight_next_player_2": float(
+                                next_objective_state[1]
+                            ),
                         }
                         | {k: float(v) for k, v in env_stats.items()}
                         # The shared `ppo_memory_log` watcher logs nothing for

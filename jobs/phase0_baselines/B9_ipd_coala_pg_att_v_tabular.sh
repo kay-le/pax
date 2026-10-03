@@ -23,6 +23,7 @@ set -euo pipefail
 #   bash B9_ipd_coala_pg_att_v_tabular.sh tri 0
 #   bash B9_ipd_coala_pg_att_v_tabular.sh tri-debug 0
 #   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline welfare_coala_pg_v_tabular
+#   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline constrained_welfare_coala_pg_v_tabular
 
 PLATFORM=${1:-tri}
 SEED=${2:-0}
