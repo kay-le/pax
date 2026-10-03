@@ -958,9 +958,19 @@ class CoalaPGLagrangian(AgentInterface):
                 )
             else:
                 per_head_loss = unclipped_value_loss
-            # Mean over batch, SUM over the two heads: each head should get the
-            # same gradient magnitude it would get as a lone critic.
-            value_loss = jnp.sum(jnp.mean(per_head_loss, axis=0))
+            # Mean over batch AND over heads. Summing over heads was wrong:
+            # the heads share one torso, so the torso received the SUM of all
+            # head gradients -- with 3 heads, ~3x the value gradient the
+            # single-critic baseline puts into the same 32-unit GRU, crowding
+            # the policy gradient out of the shared representation. Measured:
+            # with both multipliers at 0 (pure welfare) this agent converged
+            # to always-defect, while the single-critic agent on the identical
+            # objective reached CC 0.99. The mean keeps the torso's
+            # policy/value balance equal to the baseline's, which is what
+            # "same architecture, different objective" requires. Each head's
+            # own readout is zero-init linear under Adam, so the 1/heads
+            # scale on its parameters is immaterial.
+            value_loss = jnp.mean(per_head_loss)
             value_loss_welfare = jnp.mean(per_head_loss[..., 0])
             value_loss_cost = jnp.mean(per_head_loss[..., 1:])
 

@@ -95,27 +95,25 @@ welfare:
   # COALA-PG's estimator already credits rewards that appear only late, so a
   # window costs nothing in the gradient.
   #
-  # THE TWO CONSTRAINTS WANT DIFFERENT WINDOWS. They ask different questions.
+  # BOTH CONSTRAINTS USE THE WHOLE META-EPISODE. Individual rationality asks
+  # "did this player do at least as well as the no-shaping alternative?", and
+  # that alternative (mutual defection) pays v_ref in EVERY episode, early
+  # ones included. A tail window exempts the first M-K episodes from whichever
+  # constraint it is applied to -- and that exemption is exactly the failure
+  # the constraint exists to prevent. Measured both ways, same seedless setup:
   #
-  #   The SHAPER's constraint is individual rationality: "did I do at least as
-  #   well as refusing to shape?" The alternative -- always defect -- yields
-  #   v_ref for EVERY episode, including the early ones, so the comparison
-  #   must be over the whole meta-episode. Windowing it to the tail exempts
-  #   the investment phase from the accounting, which is exactly what
-  #   self-sacrifice is. Measured at constraint_window=5 (seed 1306, 3000
-  #   iters): the tail reported R_s = -19.03 >= -20 "satisfied" while the
-  #   shaper's meta-mean was -21.59, i.e. BELOW its own security level. The
-  #   implied first-15-episode mean was -22.4: the shaper paid -22.4/episode
-  #   for 15 episodes to buy -19.0 in the last 5, and the constraint called
-  #   that fine. So: window 0 for the shaper.
+  #   window on the SHAPER    (seed 1306): shaper self-sacrifices for 15
+  #     episodes (first-15 mean -22.4), tail reads -19.0 "satisfied",
+  #     meta-mean -21.6 is below its own security level.
+  #   window on the CO-PLAYER (next run):  shaper EXPLOITS for 15 episodes
+  #     (23.6% of states are DC), tail sits at mutual defection -19.5
+  #     "satisfied", lam_o decays to 0, co-player meta-mean -22.1 violated.
   #
-  #   The CO-PLAYER's constraint is the "cooperation is established" claim,
-  #   which genuinely IS about where the naive learner ends up -- it needs
-  #   several episodes to converge, and its early returns say nothing about
-  #   the equilibrium the shaper steered it to. So: a tail window, 5 of 20 =
-  #   the last quarter, after 15 episodes of learning.
+  # So: 0 for both. "Cooperation is established" (where the naive learner
+  # ends up) is an OUTCOME METRIC -- report train/final_episode/* -- not a
+  # constraint. Use a window only as an ablation, and say so.
   constraint_window_shaper: 0
-  constraint_window_opponent: 5
+  constraint_window_opponent: 0
 
   # ---- reference values (the constraint floors) ----
   #
