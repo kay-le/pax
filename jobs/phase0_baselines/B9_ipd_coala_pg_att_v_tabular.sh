@@ -137,7 +137,22 @@ EXPERIMENT="ipd=${EXPERIMENT_NAME}"
 if [ "$EXPERIMENT_NAME" = "coala_pg_v_tabular" ]; then
     RESULTS_DIR="/scratch/lichenqi/results/B9_coala_ipd_seed${SEED}"
 else
-    RESULTS_DIR="/scratch/lichenqi/results/B9_${EXPERIMENT_NAME}_seed${SEED}"
+    # Fold the Hydra overrides into the results path. Without this, two runs
+    # of the SAME config that differ only by override land in the same
+    # directory, separated by timestamp alone -- and the overrides are not
+    # copied with the results, so they are unrecoverable afterwards. This bit
+    # the constrained vs unconstrained-welfare comparison, where
+    #   lagrangian_coala_pg_v_tabular
+    # and
+    #   lagrangian_coala_pg_v_tabular ++welfare.freeze_lam=True ++welfare.lam_init=0.0
+    # produce architecturally IDENTICAL 3-head checkpoints that cannot be told
+    # apart from the files. Only the SLURM .out log distinguishes them.
+    RUN_TAG=""
+    if [ ${#EXTRA_OVERRIDES[@]} -gt 0 ]; then
+        RUN_TAG=$(printf '%s-' "${EXTRA_OVERRIDES[@]}"             | sed -e 's/++//g' -e 's/welfare\.//g' -e 's/ppo[12]\.//g'                   -e 's/[^A-Za-z0-9]/-/g' -e 's/---*/-/g' -e 's/-$//')
+        RUN_TAG="_${RUN_TAG:0:72}"
+    fi
+    RESULTS_DIR="/scratch/lichenqi/results/B9_${EXPERIMENT_NAME}${RUN_TAG}_seed${SEED}"
 fi
 HYDRA_DIR="$TMPDIR/hydra_output"
 EXP_OUTPUT="$HYDRA_DIR/exp"

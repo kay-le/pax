@@ -311,6 +311,15 @@ class WelfareEvalRunner:
                 jnp.zeros((self.args.num_opps, self.args.num_envs)),
             ]
 
+            # Fresh shaper memory per trial. A meta-learning shaper conditions
+            # on the co-player's whole learning trace through its recurrent
+            # state, so carrying that state into a trial with a NEW co-player
+            # would evaluate it on a history that never happened. No-op at
+            # num_iters=1 (the memory is already fresh from batch_init), which
+            # is what every eval config uses -- so this does not change any
+            # existing single-trial result; it matters only if num_iters > 1.
+            a1_mem = agent1.batch_reset(a1_mem, False)
+
             if self.args.agent2 == "NaiveEx":
                 a2_state, a2_mem = agent2.batch_init(obs[1])
             elif self.args.env_type in ["meta"]:
