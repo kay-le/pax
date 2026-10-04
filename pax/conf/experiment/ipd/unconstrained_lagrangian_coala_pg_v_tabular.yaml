@@ -1,6 +1,16 @@
 # @package _global_
 
-# Lagrangian constrained-welfare COALA-PG vs paper-style naive A2C learner (IPD)
+# Unconstrained welfare COALA-PG using the Lagrangian agent architecture.
+#
+# This is the controlled welfare ablation for lagrangian_coala_pg_v_tabular:
+# same runner, same CoalaPGLagrangian network, same three critic heads, but the
+# multipliers are frozen at zero so the primal objective is exactly
+#
+#   r_mix = r_s + r_o.
+#
+# Use this instead of passing `++welfare.freeze_lam=True ++welfare.lam_init=0.0`
+# to lagrangian_coala_pg_v_tabular when you want a distinct W&B group and
+# result directory.
 #
 #   max_theta  W(theta)
 #   s.t.       R_s(theta) >= v_ref_shaper      (shaper individual rationality)
@@ -77,7 +87,7 @@ welfare:
   # satisfied by accident, so a lam starting at 0 only decays; by the time real
   # violations appear the shaper has already learnt to sacrifice (or to
   # exploit) and lam must climb from nothing to undo it.
-  lam_init: 0.5
+  lam_init: 0.0
   #
   # lam_max IS DERIVED FROM THE IPD PAYOFFS, NOT TUNED. The shaper's
   # within-episode (myopic) preference under r_mix = (1+lam_s) r_s + (1+lam_o) r_o:
@@ -186,7 +196,7 @@ welfare:
   # argument for the constrained formulation is that fixed weights sacrifice
   # or exploit depending on the game, while adaptive lam lands on the boundary
   # in both -- which requires actually running this.
-  freeze_lam: False
+  freeze_lam: True
 
 # COALA-PG shaper (agent1). Unchanged from coala_pg_v_tabular.yaml except that
 # the network carries one value head per return (welfare + 2 constraints).
@@ -254,7 +264,7 @@ ppo2:
 wandb:
   entity: "lichenqi-university-of-regina"
   project: ipd
-  group: 'constrained-${agent1}-vs-${agent2}'
+  group: 'unconstrained-${agent1}-vs-${agent2}'
   name: run-seed-${seed}
   log: True
   mode: offline

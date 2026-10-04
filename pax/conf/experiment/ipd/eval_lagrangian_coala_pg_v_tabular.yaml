@@ -40,20 +40,8 @@ num_inner_steps: 10    # T, MUST match training
 num_iters: 1           # one trial per job -- sample across seeds
 num_devices: 1
 
-# ---- which checkpoint to evaluate ----
-#
-# Training writes to  <hydra.run.dir>/exp/<wandb.group>/<wandb.name>/<timestamp>/iteration_<N>
-# and the launcher copies that tree to
-#   /scratch/lichenqi/results/B9_lagrangian_coala_pg_v_tabular_seed<SEED>/
-#
-# so a concrete model_path looks like:
-#   /scratch/lichenqi/results/B9_lagrangian_coala_pg_v_tabular_seed1401/lagrangian-COALA-PG-CoalaPGLagrangian-vs-CoalaA2C/run-seed-1401/<timestamp>/iteration_3000
-#
-# Override it per job rather than editing this file:
-#   ++model_path=/scratch/.../iteration_3000
-#
-# run_path is only used by wandb.restore, which is skipped in offline mode and
-# for absolute model_paths -- leave it unless you are restoring from wandb.
+
+# Evaluation
 run_path: lichenqi-university-of-regina/ipd
 model_path: "SET_ME"
 
@@ -126,7 +114,7 @@ ppo2:
 wandb:
   entity: "lichenqi-university-of-regina"
   project: ipd
-  group: 'eval-lagrangian-COALA-PG-${agent1}-vs-${agent2}'
+  group: 'eval-constrained-${agent1}-vs-${agent2}'
   name: run-seed-${seed}
   log: True
-  mode: offline
+  mode: online
