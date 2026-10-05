@@ -1,42 +1,49 @@
 # @package _global_
 
-# Lagrangian constrained-welfare COALA-PG vs paper-style naive A2C learner (IPD)
+# Constrained-welfare COALA-PG (PID Lagrangian) vs the paper's naive A2C
+# learner (IPD). ONE config for both conditions of the comparison:
 #
-#   max_theta  W(theta)
-#   s.t.       R_s(theta) >= v_ref_shaper      (shaper individual rationality)
-#              R_o(theta) >= v_ref_opponent    (co-player individual rationality)
+#   CONSTRAINED (default):
+#     bash jobs/phase0_baselines/B9_ipd_coala_pg_att_v_tabular.sh fir $s offline \
+#         lagrangian_coala_pg_v_tabular
 #
+#   UNCONSTRAINED welfare (controlled ablation -- same agent, runner, critic
+#   heads and every hyperparameter; the multipliers are frozen at zero so the
+#   objective is exactly r_s + r_o):
+#     bash jobs/phase0_baselines/B9_ipd_coala_pg_att_v_tabular.sh fir $s offline \
+#         lagrangian_coala_pg_v_tabular \
+#         ++welfare.freeze_lam=True ++welfare.lam_init=0.0 \
+#         ++wandb.group=unconstrained-CoalaPGLagrangian-vs-CoalaA2C
+#
+#   The launcher folds the overrides into the result directory name, so the
+#   two conditions never overwrite each other. Evaluate either checkpoint
+#   with eval_lagrangian_coala_pg_v_tabular.yaml (see its header).
+#
+# Problem:
+#   max_theta  W(theta) = R_s + R_o
+#   s.t.       R_s(theta) >= v_ref_shaper      (shaper not self-sacrificing)
+#              R_o(theta) >= v_ref_opponent    (co-player not exploited)
 #   L = W + lam_s * (R_s - v_ref_shaper) + lam_o * (R_o - v_ref_opponent)
 #
-# Reference values use the SAME key names as the constrained-welfare ES runner
-# and the `coala_objective: constrained_welfare` configs, so sweeping one is a
-# single override and means the same thing across runners:
+# Both constraints are load-bearing: lam_s pulls the shaper back from
+# self-sacrifice, lam_o protects the co-player. Welfare alone is indifferent
+# between (-10, -30) and (-30, -10).
 #
-#   ++welfare.v_ref_shaper=-15 ++welfare.v_ref_opponent=-20
-#
-# TWO constraints, matching `runner_welfare_evo` (there: mu1/mu2 against
-# v_ref_shaper/v_ref_opponent). They do different jobs, which is why one is not
-# enough: lam_s pulls the shaper back from self-sacrifice, lam_o protects the
-# co-player from being exploited. With only lam_s the co-player's sole defence
-# is the welfare term, and welfare is indifferent between (-10, -30) and
-# (-30, -10) -- so the "cooperation" reached could be an exploitative split
-# that happens to sum well.
-#
-# Because each constraint is itself an expected return, the Lagrangian gradient
-# is the stock COALA-PG gradient of a reshaped reward:
-#
-#   r_mix = (r_s + r_o) + lam_s * r_s + lam_o * r_o
-#         = (1 + lam_s) * r_s + (1 + lam_o) * r_o
-#
-# The learning-aware estimator (Algorithm 1), the rollout structure and the
-# co-player are all UNCHANGED from coala_pg_v_tabular.yaml. That is deliberate:
-# it makes the selfish / welfare / constrained comparison a statement about the
-# objective, not the optimizer.
+# Each constraint is itself an expected return, so the Lagrangian gradient is
+# the stock COALA-PG gradient of a reshaped reward:
+#   r_mix = (1 + lam_s) * r_s + (1 + lam_o) * r_o
+# The learning-aware estimator, rollout and co-player are UNCHANGED from
+# coala_pg_v_tabular.yaml (the selfish baseline), so a difference in outcome
+# is attributable to the objective, not the optimizer.
 #
 # Dual update: PID Lagrangian (Stooke, Achiam & Abbeel, ICML 2020), one
-# controller per constraint. Setting a constraint's kp = kd = 0 recovers RCPO
-# (Tessler et al. 2019) dual ascent exactly, so the dual-ascent baseline is
-# this same file with those gains zeroed.
+# controller per constraint; kp = kd = 0 recovers RCPO dual ascent.
+#
+# MEASURED OUTCOME (experiments/lr_sweep_lammax2/REPORT.md; 12 seeds, 5001
+# iterations): with the defaults below the co-player is shaped into mutual
+# cooperation in 10/12 seeds, final episode ~(-10.5, -10.5) with a generous
+# tit-for-tat shaper (P(C|CC)~1, P(C|CD)~0.1-0.3, P(C|DD)~0.02). The
+# unconstrained run ends as the "sucker" outcome ~(-27, -2) in 3/4 seeds.
 
 # Agents
 agent1: 'CoalaPGLagrangian'
@@ -79,30 +86,17 @@ welfare:
   # exploit) and lam must climb from nothing to undo it.
   lam_init: 0.5
   #
-  # lam_max IS DERIVED FROM THE IPD PAYOFFS, NOT TUNED. The shaper's
-  # within-episode (myopic) preference under r_mix = (1+lam_s) r_s + (1+lam_o) r_o:
-  #
-  #   lam_s < 1 + 2*lam_o : cooperate at BOTH states  -> unconditional-C (sucker)
-  #   lam_s = 1 + 2*lam_o : r_mix identical for C and D -> no myopic force at all
-  #   lam_s > 1 + 2*lam_o : defect at BOTH states     -> always-D (selfish)
-  #
+  # lam_max. The shaper's within-episode (myopic) preference under
+  # r_mix = (1+lam_s) r_s + (1+lam_o) r_o:
+  #   lam_s < 1 + 2*lam_o : cooperate at BOTH states -> unconditional-C (sucker)
+  #   lam_s = 1 + 2*lam_o : no myopic force at all
+  #   lam_s > 1 + 2*lam_o : defect at BOTH states    -> always-D
   # No multiplier pair makes the myopic gradient prefer tit-for-tat; TFT comes
-  # ONLY from the learning-aware future-episode term. Plain welfare (lam=0) is
-  # in the sucker region, which is why it lands on unconditional-C without
-  # exploration (measured 4/4 seeds, P(coop|CD) ~ 0.98).
-  #
-  # Why 1.5 and not 1.0 (the indifference point): at exactly 1.0 the dual
-  # cancels welfare's pull toward sucker but applies NO push out of it, so a
-  # policy that saturated as sucker before lam_s got there stays frozen.
-  # Measured at v_ref=-15, cap 1.0, 3 seeds: shaper -27/-27/-22 with lam_s
-  # pinned at 1.0 and the policy ~90% in the CD (sucker) state. 1.5 gives a
-  # +0.5/step myopic push toward D, enough to evict the policy from the sucker
-  # basin; the anti-windup in `pid_lagrangian.py` then lets lam_s fall back
-  # under indifference within ~30 iterations once the shaper's constraint is
-  # met, so the push is transient and cannot carry the policy all the way to
-  # always-D. For a different payoff matrix re-derive the indifference point
-  # from (1+lam)(T - R) = R' - S' and set the cap a little above it.
-  lam_max: 1.5
+  # only from the learning-aware term, so lam only has to be able to EVICT the
+  # policy from the sucker basin. Measured: 1.0 cannot (policy frozen as
+  # sucker), 1.5 undershoots (1/6 seeds cooperate), 2.0 works. Higher values
+  # overshoot into saturated always-D.
+  lam_max: 2.0
   #
   # COALA-PG meta-trajectory returns are noisy, and a derivative term on raw
   # noise is mostly noise. 0.9 smooths the measurement the controller sees
@@ -136,36 +130,22 @@ welfare:
 
   # ---- reference values (the constraint floors) ----
   #
-  # Named exactly as in the constrained-welfare ES runner and the
-  # `coala_objective: constrained_welfare` configs, so one override sweeps a
-  # reference value and it means the same thing across runners:
+  # v_ref is PER INNER EPISODE (T=10): -10 is all-CC, -20 is all-DD (each
+  # player's security level).
   #
-  #   ++welfare.v_ref_shaper=-15 ++welfare.v_ref_opponent=-20
+  # -14 for both, NOT the security level -20. Measured (12 seeds each): at -20
+  # the floor is slack once cooperation is reached, so the welfare term slowly
+  # erodes the shaper's retaliation P(C|CD), the co-player starts exploiting
+  # again and the shaper drifts back toward self-sacrifice (~3/6 seeds end
+  # cooperative). -14 binds exactly where that drift starts: shaper-only -14
+  # gives 8/12 seeds >= 50% cooperative over the last 2000 iterations and
+  # 0/12 sucker; -14 on both gives 10/12 reaching cooperation. Say so when
+  # reporting: -14 is halfway between mutual cooperation and mutual
+  # defection, a stricter floor than individual rationality.
   #
-  # v_ref is PER INNER EPISODE, so it can be read straight off the payoff
-  # matrix. At T=10 the per-episode range is -10 (all-CC) to -20 (all-DD).
-  #
-  # -20.0 is each player's SECURITY LEVEL: the mutual-defection payoff, i.e.
-  # what they can guarantee by refusing to cooperate at all. With v_ref at the
-  # security level each constraint is exactly the individual-rationality
-  # condition from cooperative game theory, "self-sacrifice" is the
-  # well-defined event R_s < v_ref_shaper, and "exploitation" is
-  # R_o < v_ref_opponent. That is the interpretable default and what the paper
-  # should report.
-  #
-  # Raise one (e.g. -17.5) only to ask the separate question "how much better
-  # than its security level can this player be made to do", and say so.
-  #
-  # MEASURED (experiments/lr_sweep_lammax2/REPORT.md, lam_max=2, 5001 iters):
-  # at -20 the floor is slack once cooperation is reached, so welfare erodes
-  # P(C|CD) and the policy drifts back toward self-sacrifice (~3/6 seeds end
-  # cooperative). ++welfare.v_ref_shaper=-14 binds exactly where that drift
-  # happens: 8/12 seeds spend >=50% of the last 2000 iterations cooperative
-  # and 0/12 end as sucker; with v_ref_opponent=-14 as well, 10/12 reach
-  # cooperation. -14/episode is halfway between mutual C (-10) and mutual D
-  # (-20); say so when reporting, since it is stricter than the security level.
-  v_ref_shaper: -20.0
-  v_ref_opponent: -20.0
+  #   ++welfare.v_ref_shaper=-20 ++welfare.v_ref_opponent=-20   # IR floors
+  v_ref_shaper: -14.0
+  v_ref_opponent: -14.0
 
   # ---- dropping a constraint (ablation) ----
   #

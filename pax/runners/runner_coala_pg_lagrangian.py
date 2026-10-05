@@ -62,9 +62,8 @@ Two modelling choices that matter more than the controller gains:
     the same thing on both optimizers.
 
 CONFIG. Flat `welfare.*` keys, with the reference values named exactly as in
-the constrained-welfare ES runner and the `coala_objective:
-constrained_welfare` configs, so one override sweeps a reference value and it
-means the same thing everywhere:
+the constrained-welfare ES runner, so one override sweeps a reference value
+and it means the same thing everywhere:
 
     ++welfare.v_ref_shaper=-15 ++welfare.v_ref_opponent=-20
 
@@ -167,7 +166,7 @@ class CoalaPGLagrangianRunner:
 
         num_outer_steps = args.num_outer_steps
         # Flat `welfare.*` keys, reference values named exactly as in the
-        # constrained-welfare ES / coala_objective configs
+        # constrained-welfare ES configs
         # (`v_ref_shaper`, `v_ref_opponent`) so a sweep override is one token.
         self.constraints = parse_constraint_specs(args.welfare)
         self.num_constraints = len(self.constraints)
