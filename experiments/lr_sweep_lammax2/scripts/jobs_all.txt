@@ -45,3 +45,15 @@ V8_base_ent05 1 lagrangian_coala_pg_v_tabular ++welfare.lam_max=2.0 ppo1.entropy
 V8_base_ent05 2 lagrangian_coala_pg_v_tabular ++welfare.lam_max=2.0 ppo1.entropy_coeff_start=0.05
 V8_base_ent05 3 lagrangian_coala_pg_v_tabular ++welfare.lam_max=2.0 ppo1.entropy_coeff_start=0.05
 V8_base_ent05 4 lagrangian_coala_pg_v_tabular ++welfare.lam_max=2.0 ppo1.entropy_coeff_start=0.05
+V4_vref14 7 lagrangian_coala_pg_v_tabular ++welfare.lam_max=2.0 ++welfare.v_ref_shaper=-14.0
+V4_vref14 8 lagrangian_coala_pg_v_tabular ++welfare.lam_max=2.0 ++welfare.v_ref_shaper=-14.0
+V4_vref14 9 lagrangian_coala_pg_v_tabular ++welfare.lam_max=2.0 ++welfare.v_ref_shaper=-14.0
+V4_vref14 10 lagrangian_coala_pg_v_tabular ++welfare.lam_max=2.0 ++welfare.v_ref_shaper=-14.0
+V4_vref14 11 lagrangian_coala_pg_v_tabular ++welfare.lam_max=2.0 ++welfare.v_ref_shaper=-14.0
+V4_vref14 12 lagrangian_coala_pg_v_tabular ++welfare.lam_max=2.0 ++welfare.v_ref_shaper=-14.0
+V9_vref14both 1 lagrangian_coala_pg_v_tabular ++welfare.lam_max=2.0 ++welfare.v_ref_shaper=-14.0 ++welfare.v_ref_opponent=-14.0
+V9_vref14both 2 lagrangian_coala_pg_v_tabular ++welfare.lam_max=2.0 ++welfare.v_ref_shaper=-14.0 ++welfare.v_ref_opponent=-14.0
+V9_vref14both 3 lagrangian_coala_pg_v_tabular ++welfare.lam_max=2.0 ++welfare.v_ref_shaper=-14.0 ++welfare.v_ref_opponent=-14.0
+V9_vref14both 4 lagrangian_coala_pg_v_tabular ++welfare.lam_max=2.0 ++welfare.v_ref_shaper=-14.0 ++welfare.v_ref_opponent=-14.0
+V9_vref14both 5 lagrangian_coala_pg_v_tabular ++welfare.lam_max=2.0 ++welfare.v_ref_shaper=-14.0 ++welfare.v_ref_opponent=-14.0
+V9_vref14both 6 lagrangian_coala_pg_v_tabular ++welfare.lam_max=2.0 ++welfare.v_ref_shaper=-14.0 ++welfare.v_ref_opponent=-14.0
