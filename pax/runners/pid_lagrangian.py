@@ -52,6 +52,7 @@ _CONSTRAINT_KEYS = (
     "ki",
     "kd",
     "lam_init",
+    "lam_min",
     "lam_max",
     "ema_beta",
     "window",
@@ -62,6 +63,7 @@ _DEFAULTS = {
     "ki": 0.01,
     "kd": 0.0,
     "lam_init": 0.5,
+    "lam_min": 0.0,
     "lam_max": None,
     "ema_beta": 0.0,
     "window": 0,
@@ -162,6 +164,7 @@ class PIDLagrangian:
         lam_init: float = 0.5,
         lam_max: Optional[float] = None,
         ema_beta: float = 0.0,
+        lam_min: float = 0.0,
     ):
         """
         Args:
@@ -176,6 +179,16 @@ class PIDLagrangian:
           lam_max: optional ceiling. None leaves lam unbounded, which is the
             textbook method; a finite value trades exact feasibility for a
             bound on how far the objective can be tilted.
+          lam_min: floor on the multiplier (default 0, the textbook method).
+            A floor at the shaper's myopic INDIFFERENCE POINT (1.0 when the
+            co-player's multiplier is 0, see the IPD config) removes the
+            within-episode pull toward unconditional cooperation entirely:
+            below the floor every term of the primal gradient is the
+            learning-aware future-episode term, and the constraint only ever
+            ADDS a push toward defection when the shaper is actually
+            sacrificing. Measured on IPD: with floor 0 the multiplier drains
+            to ~0.4 after a violation and the policy falls back into the
+            sucker basin before the co-player has responded.
           ema_beta: if > 0, the controller sees an exponential moving average
             of the measured return instead of the raw per-iteration value.
             COALA-PG meta-trajectory returns are noisy and a derivative term on
@@ -189,12 +202,17 @@ class PIDLagrangian:
         self.ki = float(ki)
         self.kd = float(kd)
         self.lam_max = None if lam_max is None else float(lam_max)
+        self.lam_min = float(lam_min)
+        if self.lam_max is not None and self.lam_min > self.lam_max:
+            raise ValueError(
+                f"lam_min ({self.lam_min}) must not exceed lam_max ({self.lam_max})"
+            )
         self.ema_beta = float(ema_beta)
 
         # The integrator holds the multiplier that pure dual ascent would
         # produce; lam is that plus the P and D corrections.
-        self._integral = float(lam_init)
-        self.lam = float(lam_init)
+        self._integral = max(self.lam_min, float(lam_init))
+        self.lam = max(self.lam_min, float(lam_init))
         self._prev_return: Optional[float] = None
         self._smoothed_return: Optional[float] = None
 
@@ -241,7 +259,7 @@ class PIDLagrangian:
         # reference implementation does.
         hi = float("inf") if self.lam_max is None else self.lam_max
         self._integral = min(
-            hi, max(0.0, self._integral + self.ki * delta)
+            hi, max(self.lam_min, self._integral + self.ki * delta)
         )
 
         # Derivative on the COST, i.e. positive when the return is falling.
@@ -259,7 +277,7 @@ class PIDLagrangian:
         self.d_term = self.kd * max(0.0, d_raw)
 
         lam = self._integral + self.p_term + self.d_term
-        lam = max(0.0, lam)
+        lam = max(self.lam_min, lam)
         if self.lam_max is not None:
             lam = min(lam, self.lam_max)
         self.lam = lam

@@ -68,7 +68,7 @@ means the same thing everywhere:
 
     ++welfare.v_ref_shaper=-15 ++welfare.v_ref_opponent=-20
 
-Every other setting (`kp`, `ki`, `kd`, `lam_init`, `lam_max`, `ema_beta`,
+Every other setting (`kp`, `ki`, `kd`, `lam_init`, `lam_min`, `lam_max`, `ema_beta`,
 `constraint_window`) may be given once for both players or per player with a
 `_shaper` / `_opponent` suffix, the suffixed form winning:
 
@@ -180,6 +180,7 @@ class CoalaPGLagrangianRunner:
                 lam_init=c["lam_init"],
                 lam_max=c["lam_max"],
                 ema_beta=c["ema_beta"],
+                lam_min=c["lam_min"],
             )
             for c in self.constraints
         ]
@@ -500,7 +501,8 @@ class CoalaPGLagrangianRunner:
             )
             print(
                 f"      kp={c['kp']} ki={c['ki']} kd={c['kd']} "
-                f"lam_init={c['lam_init']} lam_max={c['lam_max']} "
+                f"lam_init={c['lam_init']} lam_min={c['lam_min']} "
+                f"lam_max={c['lam_max']} "
                 f"ema_beta={c['ema_beta']}{rcpo}"
             )
         if self.freeze_lam:
