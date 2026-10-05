@@ -1,4 +1,4 @@
-# generated 2026-10-05T14:01:29Z; done runs: 60/69
+# generated 2026-10-05T14:21:35Z; done runs: 62/69
 # final-ep = mean episode-20 returns (shaper, co-player) over last 50 logs (~250 iters)
 == C_lr1e-4
   s1  it= 5000 final-ep=(-22.20,-13.05) meta S=-19.13 O=-13.61 W=-32.73(sd 0.75) lam_s=0.80 lam_o=0.00 pC[CC,CD,DC,DD]=[0.59,0.45,0.57,0.38] vis[CC,CD,DC,DD]=[0.12,0.29,0.13,0.36] mixed
