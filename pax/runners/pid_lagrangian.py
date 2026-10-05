@@ -85,10 +85,10 @@ def _lookup(welfare_args, key: str, suffix: str, default: Any) -> Any:
 def parse_constraint_specs(welfare_args) -> List[Dict[str, Any]]:
     """Read the flat ``welfare.*`` keys into one spec dict per constraint.
 
-    Reference values use the SAME key names as the constrained-welfare ES and
-    `coala_objective: constrained_welfare` configs -- ``v_ref_shaper`` and
-    ``v_ref_opponent`` -- so a reference value can be swept with a single
-    override and means the same thing across runners:
+    Reference values use the SAME key names as the constrained-welfare ES
+    runner -- ``v_ref_shaper`` and ``v_ref_opponent`` -- so a reference value
+    can be swept with a single override and means the same thing across
+    runners:
 
         ++welfare.v_ref_shaper=-15 ++welfare.v_ref_opponent=-20
 
@@ -138,9 +138,10 @@ def parse_constraint_specs(welfare_args) -> List[Dict[str, Any]]:
 
     if not specs:
         raise ValueError(
-            "Every constraint is disabled, so this is the unconstrained "
-            "welfare objective. Use agent1='CoalaPG' with "
-            "runner=coala_pg and coala_objective='welfare' instead."
+            "Every constraint is disabled. For the unconstrained welfare "
+            "objective keep both constraints and run with "
+            "welfare.freeze_lam=True welfare.lam_init=0.0 instead, so the "
+            "network and critic match the constrained condition."
         )
     return specs
 

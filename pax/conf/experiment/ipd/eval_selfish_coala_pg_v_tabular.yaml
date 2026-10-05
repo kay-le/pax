@@ -40,11 +40,6 @@ num_inner_steps: 10    # T, MUST match training
 num_iters: 1           # one trial per job -- sample across seeds
 num_devices: 1
 
-# The objective only matters during training; at eval the shaper is frozen,
-# so coala_objective is recorded here for provenance and does not affect the
-# rollout. What DOES matter is agent1='CoalaPG', whose network has a single
-# value head -- matching the selfish checkpoint's parameter tree.
-coala_objective: selfish
 
 # ---- which checkpoint to evaluate ----
 #

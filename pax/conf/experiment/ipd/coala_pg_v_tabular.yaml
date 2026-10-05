@@ -31,7 +31,6 @@ payoff: [[-1, -1], [-3, 0], [0, -3], [-2, -2]]
 
 # Runner
 runner: coala_pg
-coala_objective: selfish
 
 # Save
 save: True

@@ -12,22 +12,14 @@
 #
 # condition: selfish | unconstrained | lagrangian
 # aliases: welfare -> unconstrained, constrained -> lagrangian
-#   selfish    -> eval_selfish_coala_pg_v_tabular     CoalaPG,           1 value head
-#                 trained from: coala_pg_v_tabular
-#   unconstrained
-#              -> eval_unconstrained_lagrangian_coala_pg_v_tabular
-#                 CoalaPGLagrangian, 3 value heads
-#                 trained from: unconstrained_lagrangian_coala_pg_v_tabular
-#                 (the controlled ablation: same architecture as the
-#                  lagrangian condition, multipliers frozen at zero. Add
-#                  ++agent1=CoalaPG if your welfare checkpoint instead came
-#                  from the standalone welfare_coala_pg_v_tabular config.)
-#   lagrangian -> eval_lagrangian_coala_pg_v_tabular  CoalaPGLagrangian, 3 value heads
-#                 trained from: lagrangian_coala_pg_v_tabular
-#
-# `unconstrained` and `lagrangian` checkpoints are architecturally IDENTICAL
-# (both 3-head), but they now have separate training config names, W&B groups
-# and result directories.
+#   selfish       -> eval_selfish_coala_pg_v_tabular     CoalaPG, 1 value head
+#                    trained from: coala_pg_v_tabular
+#   lagrangian    -> eval_lagrangian_coala_pg_v_tabular  CoalaPGLagrangian, 3 heads
+#                    trained from: lagrangian_coala_pg_v_tabular
+#   unconstrained -> the SAME eval config with ++welfare.freeze_lam=True
+#                    ++welfare.lam_init=0.0 and its own wandb group;
+#                    trained from: lagrangian_coala_pg_v_tabular with those
+#                    same overrides (see that file's header).
 #
 # Before running, set `model_path` and, if needed, `run_path` in the selected
 # eval YAML.
@@ -49,6 +41,7 @@
 
 PLATFORM=${1:-tri}
 CONDITION=${2:-lagrangian}
+EXTRA_OVERRIDES=()
 NUM_SEEDS=${3:-20}
 SEED_START=${4:-0}
 WANDB_MODE_ARG=${5:-online}
@@ -56,7 +49,9 @@ WANDB_MODE_ARG=${5:-online}
 case "$CONDITION" in
     selfish)    EXPERIMENT_NAME="eval_selfish_coala_pg_v_tabular" ;;
     unconstrained|welfare)
-                EXPERIMENT_NAME="eval_unconstrained_lagrangian_coala_pg_v_tabular" ;;
+                EXPERIMENT_NAME="eval_lagrangian_coala_pg_v_tabular"
+                EXTRA_OVERRIDES=(++welfare.freeze_lam=True ++welfare.lam_init=0.0
+                                 '++wandb.group=eval-unconstrained-${agent1}-vs-${agent2}') ;;
     lagrangian|constrained)
                 EXPERIMENT_NAME="eval_lagrangian_coala_pg_v_tabular" ;;
     *)
@@ -154,7 +149,7 @@ case "$PLATFORM" in
 
             python -m pax.experiment +experiment/$EXPERIMENT \
                 seed=$run_seed \
-                ++wandb.mode=$WANDB_MODE_ARG \
+                ++wandb.mode=$WANDB_MODE_ARG "${EXTRA_OVERRIDES[@]}" \
                 hydra.run.dir="$HYDRA_DIR/seed_${run_seed}"
 
             run_status=$?

@@ -1,7 +1,16 @@
 # @package _global_
 
-# EVALUATION of a trained constrained-welfare (Lagrangian) COALA-PG shaper,
-# against a FRESH naive A2C learner. Same protocol as
+# EVALUATION of a trained COALA-PG Lagrangian shaper against a FRESH naive A2C
+# learner. Serves BOTH training conditions of lagrangian_coala_pg_v_tabular:
+#
+#   constrained checkpoint:   bash jobs/phase3_evaluation/E5_ipd_eval_coala_pg.sh fir lagrangian
+#   unconstrained checkpoint: bash jobs/phase3_evaluation/E5_ipd_eval_coala_pg.sh fir unconstrained
+#
+# (the latter adds ++welfare.freeze_lam=True ++welfare.lam_init=0.0 and its
+# own wandb group). The network is identical in both -- three value heads --
+# so the same agent1 loads either checkpoint; at eval the shaper is frozen and
+# no dual update runs, so the welfare block only has to produce the right
+# number of critic heads. Point model_path at the checkpoint you want. Same protocol as
 # eval_shaper_att_v_tabular.yaml / eval_welfare_shaper_att_v_tabular.yaml:
 # load frozen shaper params, re-initialise the co-player, let the co-player
 # learn for num_outer_steps episodes, and log per-episode returns, welfare and

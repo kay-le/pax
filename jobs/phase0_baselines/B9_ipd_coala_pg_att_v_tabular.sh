@@ -22,16 +22,14 @@ set -euo pipefail
 #   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0
 #   bash B9_ipd_coala_pg_att_v_tabular.sh tri 0
 #   bash B9_ipd_coala_pg_att_v_tabular.sh tri-debug 0
-#   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline welfare_coala_pg_v_tabular
-#   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline constrained_welfare_coala_pg_v_tabular
-#   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline surrogate_constrained_welfare_coala_pg_v_tabular
-#   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline constrained_welfare_coala_pg_v_tabular ++welfare.v_ref_shaper=-15 ++welfare.v_ref_opponent=-15
 #
 #   # Lagrangian constrained welfare (PID dual, Stooke et al. 2020).
-#   # tau is PER INNER EPISODE: -20 at T=10 is the mutual-defection payoff,
-#   # i.e. the shaper's security level, which makes the constraint exactly the
-#   # individual-rationality condition.
+#   # Floors are PER INNER EPISODE; the config defaults to -14 for both
+#   # players (see the yaml header for why, and for the unconstrained ablation).
 #   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline lagrangian_coala_pg_v_tabular
+#   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline lagrangian_coala_pg_v_tabular \
+#       ++welfare.freeze_lam=True ++welfare.lam_init=0.0 \
+#       ++wandb.group=unconstrained-CoalaPGLagrangian-vs-CoalaA2C   # unconstrained ablation
 #   # RCPO dual-ascent baseline: same file, P and D gains zeroed.
 #   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline lagrangian_coala_pg_v_tabular ++welfare.kp=0 ++welfare.kd=0
 #   # Static weighted-welfare ablation: both lam frozen at lam_init.
