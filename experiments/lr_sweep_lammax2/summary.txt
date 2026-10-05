@@ -1,0 +1,10 @@
+# generated 2026-10-05T06:04:28Z; done runs: 0/30
+# final-ep = mean episode-20 returns (shaper, co-player) over last 50 logs (~250 iters)
+== C_lr1e-4
+  s1  it= 1315 final-ep=(-27.62, -4.38) meta S=-24.55 O= -5.68 W=-30.22(sd 0.64) lam_s=2.00 lam_o=0.00 pC[CC,CD,DC,DD]=[0.79,0.80,0.79,0.81] vis[CC,CD,DC,DD]=[0.12,0.60,0.03,0.14] SUCKER(~-27,-2) (running)
+== C_lr1e-4_ki3x
+  s1  it= 1325 final-ep=(-21.17,-16.71) meta S=-17.47 O=-18.39 W=-35.86(sd 0.63) lam_s=1.35 lam_o=0.00 pC[CC,CD,DC,DD]=[0.25,0.19,0.22,0.18] vis[CC,CD,DC,DD]=[0.04,0.13,0.15,0.57] mixed (running)
+== C_lr3e-4
+  s1  it= 1315 final-ep=(-22.08,-15.05) meta S=-19.25 O=-15.13 W=-34.38(sd 1.37) lam_s=1.45 lam_o=0.00 pC[CC,CD,DC,DD]=[0.33,0.32,0.40,0.39] vis[CC,CD,DC,DD]=[0.07,0.24,0.12,0.46] mixed (running)
+== U_lr3e-4
+  s1  it= 1320 final-ep=(-27.29, -5.24) meta S=-26.64 O= -2.45 W=-29.09(sd 1.06) lam_s=0.00 lam_o=0.00 pC[CC,CD,DC,DD]=[1.00,0.98,0.53,0.71] vis[CC,CD,DC,DD]=[0.13,0.72,0.00,0.04] SUCKER(~-27,-2) (running)
