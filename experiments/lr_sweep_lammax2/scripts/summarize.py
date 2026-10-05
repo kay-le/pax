@@ -39,7 +39,7 @@ def classify_old(r):
     return "mixed"
 if __name__ == "__main__":
     tail = int(sys.argv[2]) if len(sys.argv)>2 else 50
-    for tag in sorted(glob.glob(sys.argv[1] if len(sys.argv)>1 else "/tmp/claude-0/runs/[CU]_*")):
+    for tag in sorted(glob.glob(sys.argv[1] if len(sys.argv)>1 else "/tmp/claude-0/runs/[CUV]_*")):
         print("==",os.path.basename(tag))
         for sd in sorted(glob.glob(tag+"/s*")):
             rows=parse(sd+"/log.txt")

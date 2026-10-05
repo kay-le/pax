@@ -2,7 +2,7 @@ import sys, glob, os, csv
 sys.path.insert(0, os.path.dirname(__file__))
 from summarize import parse
 out = sys.argv[1]
-for sd in sorted(glob.glob("/tmp/claude-0/runs/[CU]_*/s*")):
+for sd in sorted(glob.glob("/tmp/claude-0/runs/[CUV]_*/s*")):
     rows = parse(sd + "/log.txt")
     if not rows: continue
     tag, seed = sd.split("/")[-2:]
