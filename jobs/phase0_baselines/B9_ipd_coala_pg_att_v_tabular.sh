@@ -212,7 +212,7 @@ shopt -s nullglob
 echo "Copying final results to $RESULTS_DIR ..."
 group_dirs=("$EXP_OUTPUT"/*/)
 if [ ${#group_dirs[@]} -eq 0 ]; then
-    echo "WARNING: no run directories under $EXP_OUTPUT — nothing to copy." >&2
+    echo "WARNING: no run directories under $EXP_OUTPUT  nothing to copy." >&2
     echo "         (expected $EXP_OUTPUT/<wandb.group>/<wandb.name>/<timestamp>/)" >&2
 else
     for d in "${group_dirs[@]}"; do
@@ -229,7 +229,7 @@ if [ "$WANDB_MODE_ARG" = "offline" ]; then
     # wandb appends its own "wandb/" under WANDB_DIR, hence the doubled path.
     offline_runs=("$WANDB_DIR"/wandb/offline-run-*)
     if [ ${#offline_runs[@]} -eq 0 ]; then
-        echo "WARNING: no offline-run-* under $WANDB_DIR/wandb — nothing to sync." >&2
+        echo "WARNING: no offline-run-* under $WANDB_DIR/wandb nothing to sync." >&2
         echo "         Contents of $WANDB_DIR:" >&2
         ls -lR "$WANDB_DIR" 2>&1 | head -40 >&2
     else
