@@ -553,11 +553,36 @@ class CoalaPGLagrangianRunner:
                 else:
                     print(f"Saving iteration {i} locally")
 
+            # Match the Shaper runners: log to W&B every outer iteration with
+            # the actual training iteration as W&B's step. Console output stays
+            # throttled by log_interval.
+            first_1, last_1 = float(ep_rewards_1[0]), float(ep_rewards_1[-1])
+            first_2, last_2 = float(ep_rewards_2[0]), float(ep_rewards_2[-1])
+            lam_used_f = [float(x) for x in lam_used]
+            lam_next_f = [float(x) for x in self.lam]
+            meta_means = [
+                float(ep_rewards_1.mean()),
+                float(ep_rewards_2.mean()),
+            ]
+            n_violated = 0
+            n_ir_violated = 0
+            for k, (c, ctrl) in enumerate(zip(self.constraints, self.controllers)):
+                viol = ctrl.tau - r_constrained[k]
+                ir_viol = ctrl.tau - meta_means[c["reward_index"]]
+                n_violated += viol > 0
+                n_ir_violated += ir_viol > 0
+            w_s = 1.0 + sum(
+                lam_used_f[k]
+                for k, c in enumerate(self.constraints)
+                if c["reward_index"] == 0
+            )
+            w_o = 1.0 + sum(
+                lam_used_f[k]
+                for k, c in enumerate(self.constraints)
+                if c["reward_index"] == 1
+            )
+
             if i % log_interval == 0:
-                first_1, last_1 = float(ep_rewards_1[0]), float(ep_rewards_1[-1])
-                first_2, last_2 = float(ep_rewards_2[0]), float(ep_rewards_2[-1])
-                lam_used_f = [float(x) for x in lam_used]
-                lam_next_f = [float(x) for x in self.lam]
                 print(f"Iteration {i}")
                 print(
                     f"  episode 1   : shaper {first_1:.4f} | co-player {first_2:.4f}"
@@ -637,103 +662,104 @@ class CoalaPGLagrangianRunner:
                     print(f"  {stat}: {float(val)}")
                 print()
 
-                if watchers:
-                    flat_a1 = jax.tree_util.tree_map(jnp.mean, a1_metrics)
-                    agent1._logger.metrics = agent1._logger.metrics | flat_a1
-                    flat_a2 = jax.tree_util.tree_map(
-                        lambda x: jnp.sum(jnp.mean(x, 1)), a2_metrics
-                    )
-                    agent2._logger.metrics = agent2._logger.metrics | flat_a2
-                    for watcher, agent in zip(watchers, agents):
-                        watcher(agent)
+            if watchers:
+                flat_a1 = jax.tree_util.tree_map(jnp.mean, a1_metrics)
+                agent1._logger.metrics = agent1._logger.metrics | flat_a1
+                flat_a2 = jax.tree_util.tree_map(
+                    lambda x: jnp.sum(jnp.mean(x, 1)), a2_metrics
+                )
+                agent2._logger.metrics = agent2._logger.metrics | flat_a2
+                for watcher, agent in zip(watchers, agents):
+                    watcher(agent)
 
-                    per_constraint = {}
-                    for k, (c, ctrl) in enumerate(
-                        zip(self.constraints, self.controllers)
-                    ):
-                        tag = c["name"].replace("-", "_")
-                        viol = ctrl.tau - r_constrained[k]
-                        per_constraint[
-                            f"train/lagrangian/{tag}/constrained_return"
-                        ] = r_constrained[k]
-                        per_constraint[f"train/lagrangian/{tag}/lam_used"] = (
-                            lam_used_f[k]
-                        )
-                        per_constraint[f"train/lagrangian/{tag}/violation"] = (
-                            viol
-                        )
-                        per_constraint[f"train/lagrangian/{tag}/feasible"] = (
-                            float(viol <= 0)
-                        )
-                        per_constraint[f"train/lagrangian/{tag}/tau"] = ctrl.tau
-                        per_constraint[f"train/lagrangian/{tag}/integral"] = (
-                            ctrl._integral
-                        )
-                        per_constraint[f"train/lagrangian/{tag}/p_term"] = (
-                            ctrl.p_term
-                        )
-                        per_constraint[f"train/lagrangian/{tag}/d_term"] = (
-                            ctrl.d_term
-                        )
-                        # Full-meta-episode IR, independent of the window the
-                        # dual regulates. THIS is the quantity the paper's
-                        # "no self-sacrifice / no exploitation" claim rests on.
-                        ir_viol = (
-                            ctrl.tau - meta_means[c["reward_index"]]
-                        )
-                        per_constraint[
-                            f"train/lagrangian/{tag}/ir_full_meta_return"
-                        ] = meta_means[c["reward_index"]]
-                        per_constraint[
-                            f"train/lagrangian/{tag}/ir_full_meta_violation"
-                        ] = ir_viol
-                        per_constraint[
-                            f"train/lagrangian/{tag}/ir_full_meta_feasible"
-                        ] = float(ir_viol <= 0)
-
-                    wandb.log(
-                        {
-                            "train_iteration": i,
-                            "train/reward_per_episode/player_1": float(
-                                ep_rewards_1.mean()
-                            ),
-                            "train/reward_per_episode/player_2": float(
-                                ep_rewards_2.mean()
-                            ),
-                            "train/welfare": float(
-                                ep_rewards_1.mean() + ep_rewards_2.mean()
-                            ),
-                            "train/first_episode/player_1": first_1,
-                            "train/first_episode/player_2": first_2,
-                            "train/final_episode/player_1": last_1,
-                            "train/final_episode/player_2": last_2,
-                            "train/shaping_delta/player_2": last_2 - first_2,
-                            # Effective reward weights, and whether every
-                            # constraint is satisfied at once -- the thing the
-                            # "cooperation is established" claim rests on.
-                            "train/lagrangian/self_weight": w_s,
-                            "train/lagrangian/opponent_weight": w_o,
-                            "train/lagrangian/weight_ratio": w_s / w_o,
-                            "train/lagrangian/all_feasible": float(
-                                n_violated == 0
-                            ),
-                            "train/lagrangian/num_violated": float(n_violated),
-                            # Both players individually rational over the
-                            # whole meta-episode -- the headline condition.
-                            "train/lagrangian/all_ir_full_meta": float(
-                                n_ir_violated == 0
-                            ),
-                            "train/lagrangian/num_ir_violated": float(
-                                n_ir_violated
-                            ),
-                        }
-                        | per_constraint
-                        | {k2: float(v) for k2, v in env_stats.items()}
-                        | {
-                            f"train/shaper/{k2}": float(v)
-                            for k2, v in flat_a1.items()
-                        },
+                per_constraint = {}
+                for k, (c, ctrl) in enumerate(
+                    zip(self.constraints, self.controllers)
+                ):
+                    tag = c["name"].replace("-", "_")
+                    viol = ctrl.tau - r_constrained[k]
+                    per_constraint[
+                        f"train/lagrangian/{tag}/constrained_return"
+                    ] = r_constrained[k]
+                    per_constraint[f"train/lagrangian/{tag}/lam_used"] = (
+                        lam_used_f[k]
                     )
+                    per_constraint[f"train/lagrangian/{tag}/violation"] = (
+                        viol
+                    )
+                    per_constraint[f"train/lagrangian/{tag}/feasible"] = (
+                        float(viol <= 0)
+                    )
+                    per_constraint[f"train/lagrangian/{tag}/tau"] = ctrl.tau
+                    per_constraint[f"train/lagrangian/{tag}/integral"] = (
+                        ctrl._integral
+                    )
+                    per_constraint[f"train/lagrangian/{tag}/p_term"] = (
+                        ctrl.p_term
+                    )
+                    per_constraint[f"train/lagrangian/{tag}/d_term"] = (
+                        ctrl.d_term
+                    )
+                    # Full-meta-episode IR, independent of the window the
+                    # dual regulates. THIS is the quantity the paper's
+                    # "no self-sacrifice / no exploitation" claim rests on.
+                    ir_viol = (
+                        ctrl.tau - meta_means[c["reward_index"]]
+                    )
+                    per_constraint[
+                        f"train/lagrangian/{tag}/ir_full_meta_return"
+                    ] = meta_means[c["reward_index"]]
+                    per_constraint[
+                        f"train/lagrangian/{tag}/ir_full_meta_violation"
+                    ] = ir_viol
+                    per_constraint[
+                        f"train/lagrangian/{tag}/ir_full_meta_feasible"
+                    ] = float(ir_viol <= 0)
+
+                wandb.log(
+                    {
+                        "train_iteration": i,
+                        "train/reward_per_episode/player_1": float(
+                            ep_rewards_1.mean()
+                        ),
+                        "train/reward_per_episode/player_2": float(
+                            ep_rewards_2.mean()
+                        ),
+                        "train/welfare": float(
+                            ep_rewards_1.mean() + ep_rewards_2.mean()
+                        ),
+                        "train/first_episode/player_1": first_1,
+                        "train/first_episode/player_2": first_2,
+                        "train/final_episode/player_1": last_1,
+                        "train/final_episode/player_2": last_2,
+                        "train/shaping_delta/player_2": last_2 - first_2,
+                        # Effective reward weights, and whether every
+                        # constraint is satisfied at once -- the thing the
+                        # "cooperation is established" claim rests on.
+                        "train/lagrangian/self_weight": w_s,
+                        "train/lagrangian/opponent_weight": w_o,
+                        "train/lagrangian/weight_ratio": w_s / w_o,
+                        "train/lagrangian/all_feasible": float(
+                            n_violated == 0
+                        ),
+                        "train/lagrangian/num_violated": float(n_violated),
+                        # Both players individually rational over the
+                        # whole meta-episode -- the headline condition.
+                        "train/lagrangian/all_ir_full_meta": float(
+                            n_ir_violated == 0
+                        ),
+                        "train/lagrangian/num_ir_violated": float(
+                            n_ir_violated
+                        ),
+                    }
+                    | per_constraint
+                    | {k2: float(v) for k2, v in env_stats.items()}
+                    | {
+                        f"train/shaper/{k2}": float(v)
+                        for k2, v in flat_a1.items()
+                    },
+                    step=i,
+                )
 
         agents[0]._state = a1_state
         agents[1]._state = a2_state

@@ -354,6 +354,11 @@ class CoalaPGRunner:
             )
             mean_return_1 = float(ep_rewards_1.mean())
             mean_return_2 = float(ep_rewards_2.mean())
+            # Match the Shaper runners: log to W&B every outer iteration with
+            # the actual training iteration as W&B's step. Console output stays
+            # throttled by log_interval.
+            first_1, last_1 = float(ep_rewards_1[0]), float(ep_rewards_1[-1])
+            first_2, last_2 = float(ep_rewards_2[0]), float(ep_rewards_2[-1])
 
             if i % self.args.save_interval == 0:
                 log_savepath = os.path.join(self.save_dir, f"iteration_{i}")
@@ -367,8 +372,6 @@ class CoalaPGRunner:
             if i % log_interval == 0:
                 # First vs last inner episode is the shaping signal: it shows
                 # what the co-player's learning was steered toward.
-                first_1, last_1 = float(ep_rewards_1[0]), float(ep_rewards_1[-1])
-                first_2, last_2 = float(ep_rewards_2[0]), float(ep_rewards_2[-1])
                 print(f"Iteration {i}")
                 print(
                     f"  episode 1   : shaper {first_1:.4f} | co-player {first_2:.4f}"
@@ -386,47 +389,35 @@ class CoalaPGRunner:
                     print(f"  {stat}: {float(val)}")
                 print()
 
-                if watchers:
-                    flat_a1 = jax.tree_util.tree_map(jnp.mean, a1_metrics)
-                    agent1._logger.metrics = (
-                        agent1._logger.metrics | flat_a1
-                    )
-                    flat_a2 = jax.tree_util.tree_map(jnp.mean, a2_metrics)
-                    agent2._logger.metrics = (
-                        agent2._logger.metrics | flat_a2
-                    )
-                    for watcher, agent in zip(watchers, agents):
-                        watcher(agent)
+            if watchers:
+                flat_a1 = jax.tree_util.tree_map(jnp.mean, a1_metrics)
+                agent1._logger.metrics = agent1._logger.metrics | flat_a1
+                flat_a2 = jax.tree_util.tree_map(jnp.mean, a2_metrics)
+                agent2._logger.metrics = agent2._logger.metrics | flat_a2
+                for watcher, agent in zip(watchers, agents):
+                    watcher(agent)
 
-                    wandb.log(
-                        {
-                            "train_iteration": i,
-                            "train/reward_per_episode/player_1": float(
-                                ep_rewards_1.mean()
-                            ),
-                            "train/reward_per_episode/player_2": float(
-                                ep_rewards_2.mean()
-                            ),
-                            "train/welfare": float(
-                                ep_rewards_1.mean() + ep_rewards_2.mean()
-                            ),
-                            "train/first_episode/player_1": first_1,
-                            "train/first_episode/player_2": first_2,
-                            "train/final_episode/player_1": last_1,
-                            "train/final_episode/player_2": last_2,
-                            # Shaping signal: how much the co-player's return
-                            # improved from the first to the last inner episode.
-                            "train/shaping_delta/player_2": last_2 - first_2,
-                        }
-                        | {k: float(v) for k, v in env_stats.items()}
-                        # The shared `ppo_memory_log` watcher logs nothing for
-                        # this agent, so surface the COALA-PG diagnostics
-                        # (advantage magnitudes, losses, grad norms) here.
-                        | {
-                            f"train/shaper/{k}": float(v)
-                            for k, v in flat_a1.items()
-                        },
-                    )
+                wandb.log(
+                    {
+                        "train_iteration": i,
+                        "train/reward_per_episode/player_1": mean_return_1,
+                        "train/reward_per_episode/player_2": mean_return_2,
+                        "train/welfare": mean_return_1 + mean_return_2,
+                        "train/first_episode/player_1": first_1,
+                        "train/first_episode/player_2": first_2,
+                        "train/final_episode/player_1": last_1,
+                        "train/final_episode/player_2": last_2,
+                        # Shaping signal: how much the co-player's return
+                        # improved from the first to the last inner episode.
+                        "train/shaping_delta/player_2": last_2 - first_2,
+                    }
+                    | {k: float(v) for k, v in env_stats.items()}
+                    # The shared `ppo_memory_log` watcher logs nothing for
+                    # this agent, so surface the COALA-PG diagnostics
+                    # (advantage magnitudes, losses, grad norms) here.
+                    | {f"train/shaper/{k}": float(v) for k, v in flat_a1.items()},
+                    step=i,
+                )
 
         agents[0]._state = a1_state
         agents[1]._state = a2_state
