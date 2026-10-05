@@ -57,3 +57,9 @@ V9_vref14both 3 lagrangian_coala_pg_v_tabular ++welfare.lam_max=2.0 ++welfare.v_
 V9_vref14both 4 lagrangian_coala_pg_v_tabular ++welfare.lam_max=2.0 ++welfare.v_ref_shaper=-14.0 ++welfare.v_ref_opponent=-14.0
 V9_vref14both 5 lagrangian_coala_pg_v_tabular ++welfare.lam_max=2.0 ++welfare.v_ref_shaper=-14.0 ++welfare.v_ref_opponent=-14.0
 V9_vref14both 6 lagrangian_coala_pg_v_tabular ++welfare.lam_max=2.0 ++welfare.v_ref_shaper=-14.0 ++welfare.v_ref_opponent=-14.0
+V10_vref14_cap15 1 lagrangian_coala_pg_v_tabular ++welfare.lam_max=1.5 ++welfare.v_ref_shaper=-14.0
+V10_vref14_cap15 2 lagrangian_coala_pg_v_tabular ++welfare.lam_max=1.5 ++welfare.v_ref_shaper=-14.0
+V10_vref14_cap15 3 lagrangian_coala_pg_v_tabular ++welfare.lam_max=1.5 ++welfare.v_ref_shaper=-14.0
+V10_vref14_cap15 4 lagrangian_coala_pg_v_tabular ++welfare.lam_max=1.5 ++welfare.v_ref_shaper=-14.0
+V10_vref14_cap15 5 lagrangian_coala_pg_v_tabular ++welfare.lam_max=1.5 ++welfare.v_ref_shaper=-14.0
+V10_vref14_cap15 6 lagrangian_coala_pg_v_tabular ++welfare.lam_max=1.5 ++welfare.v_ref_shaper=-14.0
