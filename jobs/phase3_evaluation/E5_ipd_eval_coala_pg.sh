@@ -8,54 +8,64 @@
 # read off.
 #
 # Usage:
-#   bash E5_ipd_eval_coala_pg.sh <platform> <condition> [num_seeds] [seed_start] [wandb_mode]
+#   bash E5_ipd_eval_coala_pg.sh <platform> <condition> [num_seeds|seed_csv] [seed_start] [wandb_mode]
 #
-# condition: selfish | unconstrained | lagrangian
-# aliases: welfare -> unconstrained, constrained -> lagrangian
+# condition: selfish | welfare | constrained
+# aliases: unconstrained -> welfare, lagrangian -> constrained
 #   selfish       -> eval_selfish_coala_pg_v_tabular     CoalaPG, 1 value head
 #                    trained from: coala_pg_v_tabular
-#   lagrangian    -> eval_lagrangian_coala_pg_v_tabular  CoalaPGLagrangian, 3 heads
+#   welfare       -> eval_welfare_coala_pg_v_tabular     CoalaPG, 1 value head
+#                    trained from: welfare_coala_pg_v_tabular
+#   constrained   -> eval_lagrangian_coala_pg_v_tabular  CoalaPGLagrangian, 3 heads
 #                    trained from: lagrangian_coala_pg_v_tabular
-#   unconstrained -> the SAME eval config with ++welfare.freeze_lam=True
-#                    ++welfare.lam_init=0.0 and its own wandb group;
-#                    trained from: lagrangian_coala_pg_v_tabular with those
-#                    same overrides (see that file's header).
 #
-# Before running, set `model_path` and, if needed, `run_path` in the selected
-# eval YAML.
+# Before running, either set `model_path` / `run_path` in the selected eval
+# YAML, or provide a seed that appears in that YAML's `checkpoints` map.
 #
-# The condition MUST match the checkpoint architecture. `selfish` uses CoalaPG
-# with one value head. `unconstrained` and `lagrangian` both use
-# CoalaPGLagrangian with three value heads; they differ by trained objective,
-# W&B group and result directory, not by parameter-tree shape.
+# The condition MUST match the checkpoint architecture. `selfish` and
+# `welfare` use CoalaPG with one value head. `constrained` uses
+# CoalaPGLagrangian with three value heads.
 #
 # Examples:
 #   # one trained seed, 20 fresh co-players
-#   bash E5_ipd_eval_coala_pg.sh fir lagrangian
+#   bash E5_ipd_eval_coala_pg.sh fir constrained
 #   # 5 co-players, seeds 100-104
-#   bash E5_ipd_eval_coala_pg.sh fir unconstrained 5 100
+#   bash E5_ipd_eval_coala_pg.sh fir welfare 5 100
+#   # non-contiguous training/checkpoint seeds from the eval YAML checkpoint map
+#   bash E5_ipd_eval_coala_pg.sh fir constrained 13992,14002,14012,24343,44545,67655
 #   # smoke test
-#   bash E5_ipd_eval_coala_pg.sh tri-debug lagrangian
+#   bash E5_ipd_eval_coala_pg.sh tri-debug constrained
 #
-# To sweep training seeds, call this once per checkpoint.
+# To sweep non-contiguous training/checkpoint seeds, pass them as a comma-
+# separated third argument.
 
 PLATFORM=${1:-tri}
 CONDITION=${2:-lagrangian}
 EXTRA_OVERRIDES=()
-NUM_SEEDS=${3:-20}
-SEED_START=${4:-0}
-WANDB_MODE_ARG=${5:-online}
+SEEDS_ARG=${3:-20}
+if [[ "$SEEDS_ARG" == *,* ]]; then
+    IFS=',' read -r -a SEED_LIST <<< "$SEEDS_ARG"
+    NUM_SEEDS=${#SEED_LIST[@]}
+    SEED_START=${SEED_LIST[0]}
+    WANDB_MODE_ARG=${4:-online}
+else
+    NUM_SEEDS=$SEEDS_ARG
+    SEED_START=${4:-0}
+    WANDB_MODE_ARG=${5:-online}
+    SEED_LIST=()
+    for ((offset=0; offset<NUM_SEEDS; offset++)); do
+        SEED_LIST+=($((SEED_START + offset)))
+    done
+fi
 
 case "$CONDITION" in
     selfish)    EXPERIMENT_NAME="eval_selfish_coala_pg_v_tabular" ;;
-    unconstrained|welfare)
-                EXPERIMENT_NAME="eval_lagrangian_coala_pg_v_tabular"
-                EXTRA_OVERRIDES=(++welfare.freeze_lam=True ++welfare.lam_init=0.0
-                                 '++wandb.group=eval-unconstrained-${agent1}-vs-${agent2}') ;;
-    lagrangian|constrained)
+    welfare|unconstrained)
+                EXPERIMENT_NAME="eval_welfare_coala_pg_v_tabular" ;;
+    constrained|lagrangian)
                 EXPERIMENT_NAME="eval_lagrangian_coala_pg_v_tabular" ;;
     *)
-        echo "Unknown condition '$CONDITION'. Use: selfish | unconstrained | lagrangian" >&2
+        echo "Unknown condition '$CONDITION'. Use: selfish | welfare | constrained" >&2
         exit 1
         ;;
 esac
@@ -133,7 +143,11 @@ echo "=== E5 COALA-PG EVAL ==="
 echo "  platform  : $PLATFORM"
 echo "  condition : $CONDITION  ($EXPERIMENT_NAME)"
 echo "  checkpoint: from pax/conf/experiment/ipd/${EXPERIMENT_NAME}.yaml"
-echo "  seeds     : ${SEED_START}..${SEED_END}  ($NUM_SEEDS fresh co-players)"
+if [[ "$SEEDS_ARG" == *,* ]]; then
+    echo "  seeds     : ${SEED_LIST[*]}  ($NUM_SEEDS checkpoint/eval seeds)"
+else
+    echo "  seeds     : ${SEED_START}..${SEED_END}  ($NUM_SEEDS fresh co-players)"
+fi
 echo "  wandb     : $WANDB_MODE_ARG"
 echo "  started   : $(date '+%Y-%m-%d %H:%M:%S')"
 echo
@@ -143,7 +157,7 @@ cd /project/def-jtyao/lichenqi/pax
 case "$PLATFORM" in
     fir|tri)
         for ((offset=0; offset<NUM_SEEDS; offset++)); do
-            run_seed=$((SEED_START + offset))
+            run_seed=${SEED_LIST[$offset]}
             run_start_time=$(date +%s)
             echo "=== Trial $((offset + 1))/$NUM_SEEDS | eval seed=$run_seed | $(date '+%H:%M:%S') ==="
 

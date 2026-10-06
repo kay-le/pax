@@ -36,6 +36,23 @@ num_devices: 1
 run_path: lichenqi-university-of-regina/ipd
 model_path: "SET_ME"
 
+# Seed-specific checkpoints pulled from W&B. If present, the eval runner
+# selects checkpoints[str(checkpoint_seed or seed)] and overrides the
+# run_path/model_path defaults above.
+checkpoints:
+  '14012':
+    run_path: lichenqi-university-of-regina/ipd/a4hxd967
+    model_path: exp/64unconstrained-CoalaPG-vs-CoalaA2C/run-seed-14012/2026-10-06_14.44.58.030115/iteration_5000
+    max_iteration: 5000
+  '24343':
+    run_path: lichenqi-university-of-regina/ipd/iy14jc03
+    model_path: exp/64unconstrained-CoalaPG-vs-CoalaA2C/run-seed-24343/2026-10-06_14.45.23.244760/iteration_5000
+    max_iteration: 5000
+  '67655':
+    run_path: lichenqi-university-of-regina/ipd/fc041sor
+    model_path: exp/64unconstrained-CoalaPG-vs-CoalaA2C/run-seed-67655/2026-10-06_14.45.09.137944/iteration_5000
+    max_iteration: 5000
+
 # IR reference values for eval reporting only.
 welfare:
   v_ref_shaper: -20.0

@@ -58,6 +58,23 @@ num_devices: 1
 run_path: lichenqi-university-of-regina/ipd
 model_path: "SET_ME"
 
+# Seed-specific checkpoints pulled from W&B. If present, the eval runner
+# selects checkpoints[str(checkpoint_seed or seed)] and overrides the
+# run_path/model_path defaults above.
+checkpoints:
+  '13992':
+    run_path: lichenqi-university-of-regina/ipd/o1qvah7k
+    model_path: exp/64selfish-CoalaPG-vs-CoalaA2C/run-seed-13992/2026-10-06_14.44.58.022853/iteration_3000
+    max_iteration: 3000
+  '14012':
+    run_path: lichenqi-university-of-regina/ipd/hhif0tuk
+    model_path: exp/64selfish-CoalaPG-vs-CoalaA2C/run-seed-14012/2026-10-06_14.45.23.151063/iteration_3000
+    max_iteration: 3000
+  '67655':
+    run_path: lichenqi-university-of-regina/ipd/9z63hfe6
+    model_path: exp/64selfish-CoalaPG-vs-CoalaA2C/run-seed-67655/2026-10-06_14.51.14.510189/iteration_3000
+    max_iteration: 3000
+
 # IR reference values. -20.0 is each player's security level (the
 # mutual-defection payoff at T=10), which makes the logged slack exactly the
 # individual-rationality margin. Keep these equal to the training values so

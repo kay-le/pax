@@ -60,6 +60,22 @@ class WelfareEvalRunner:
         self.random_key = jax.random.PRNGKey(args.seed)
         self.run_path = args.run_path
         self.model_path = args.model_path
+        checkpoint_map = args.get("checkpoints", None)
+        if checkpoint_map:
+            checkpoint_seed = str(args.get("checkpoint_seed", args.seed))
+            if checkpoint_seed not in checkpoint_map:
+                available = ", ".join(str(k) for k in checkpoint_map.keys())
+                raise ValueError(
+                    f"No checkpoint entry for seed {checkpoint_seed}. "
+                    f"Available checkpoint seeds: {available}"
+                )
+            checkpoint = checkpoint_map[checkpoint_seed]
+            self.run_path = checkpoint.run_path
+            self.model_path = checkpoint.model_path
+            print(
+                f"Selected checkpoint seed {checkpoint_seed}: "
+                f"{self.model_path}"
+            )
         self.ipd_stats = jax.jit(ipd_visitation)
         self.cg_stats = jax.jit(cg_visitation)
         self.cg_stats_per_step = jax.jit(jax.vmap(cg_visitation))
