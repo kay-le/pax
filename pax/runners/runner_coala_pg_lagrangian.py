@@ -190,6 +190,7 @@ class CoalaPGLagrangianRunner:
         self.lam = jnp.asarray(
             [c.lam for c in self.controllers], dtype=jnp.float32
         )
+        self.violation_counters = [0 for _ in self.constraints]
 
         # [K, M] -- one window mask per constraint.
         window_masks = jnp.stack(
@@ -543,6 +544,11 @@ class CoalaPGLagrangianRunner:
                     ],
                     dtype=jnp.float32,
                 )
+            for k, (c, ctrl) in enumerate(zip(self.constraints, self.controllers)):
+                if ctrl.tau - r_constrained[k] > 0:
+                    self.violation_counters[k] += 1
+                else:
+                    self.violation_counters[k] = 0
 
             if i % self.args.save_interval == 0:
                 log_savepath = os.path.join(self.save_dir, f"iteration_{i}")
@@ -716,18 +722,37 @@ class CoalaPGLagrangianRunner:
                         f"train/lagrangian/{tag}/ir_full_meta_feasible"
                     ] = float(ir_viol <= 0)
 
+                lagrangian_summary = {}
+                for k, c in enumerate(self.constraints):
+                    suffix = c["suffix"]
+                    player_num = c["reward_index"] + 1
+                    full_meta_slack = meta_means[c["reward_index"]] - c["tau"]
+                    lagrangian_summary[
+                        f"train/lagrangian/lambda{player_num}_{suffix}"
+                    ] = lam_next_f[k]
+                    lagrangian_summary[
+                        f"train/lagrangian/lambda{player_num}_{suffix}_used"
+                    ] = lam_used_f[k]
+                    lagrangian_summary[
+                        f"train/lagrangian/constraint_slack_{suffix}"
+                    ] = full_meta_slack
+                    lagrangian_summary[
+                        f"train/lagrangian/violation_counter_{player_num}"
+                    ] = self.violation_counters[k]
+
                 wandb.log(
                     {
                         "train_iteration": i,
-                        "train/reward_per_episode/player_1": float(
-                            ep_rewards_1.mean()
+                        "train/reward_per_episode/player_1": meta_means[0],
+                        "train/reward_per_episode/player_2": meta_means[1],
+                        "train/reward_per_timestep/player_1": (
+                            meta_means[0] / self.args.num_inner_steps
                         ),
-                        "train/reward_per_episode/player_2": float(
-                            ep_rewards_2.mean()
+                        "train/reward_per_timestep/player_2": (
+                            meta_means[1] / self.args.num_inner_steps
                         ),
-                        "train/welfare": float(
-                            ep_rewards_1.mean() + ep_rewards_2.mean()
-                        ),
+                        "train/welfare/mean": meta_means[0] + meta_means[1],
+                        "train/welfare": meta_means[0] + meta_means[1],
                         "train/first_episode/player_1": first_1,
                         "train/first_episode/player_2": first_2,
                         "train/final_episode/player_1": last_1,
@@ -753,6 +778,7 @@ class CoalaPGLagrangianRunner:
                         ),
                     }
                     | per_constraint
+                    | lagrangian_summary
                     | {k2: float(v) for k2, v in env_stats.items()}
                     | {
                         f"train/shaper/{k2}": float(v)

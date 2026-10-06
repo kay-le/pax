@@ -402,6 +402,13 @@ class CoalaPGRunner:
                         "train_iteration": i,
                         "train/reward_per_episode/player_1": mean_return_1,
                         "train/reward_per_episode/player_2": mean_return_2,
+                        "train/reward_per_timestep/player_1": (
+                            mean_return_1 / self.args.num_inner_steps
+                        ),
+                        "train/reward_per_timestep/player_2": (
+                            mean_return_2 / self.args.num_inner_steps
+                        ),
+                        "train/welfare/mean": mean_return_1 + mean_return_2,
                         "train/welfare": mean_return_1 + mean_return_2,
                         "train/first_episode/player_1": first_1,
                         "train/first_episode/player_2": first_2,
