@@ -23,6 +23,10 @@ set -euo pipefail
 #   bash B9_ipd_coala_pg_att_v_tabular.sh tri 0
 #   bash B9_ipd_coala_pg_att_v_tabular.sh tri-debug 0
 #
+#   # One-head welfare COALA-PG: same CoalaPG architecture as the selfish
+#   # baseline, but the meta-agent optimizes r_shaper + r_coplayer.
+#   bash B9_ipd_coala_pg_att_v_tabular.sh fir 0 offline welfare_coala_pg_v_tabular
+#
 #   # Lagrangian constrained welfare (PID dual, Stooke et al. 2020).
 #   # Floors are PER INNER EPISODE; the config defaults to -14 for both
 #   # players (see the yaml header for why, and for the unconstrained ablation).

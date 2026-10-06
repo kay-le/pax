@@ -77,6 +77,12 @@ class CoalaPGRunner:
         self.train_episodes = 0
         self.ipd_stats = jax.jit(ipd_visitation)
         self.cg_stats = jax.jit(cg_visitation)
+        self.objective = str(getattr(args, "coala_objective", "selfish"))
+        if self.objective not in ("selfish", "welfare"):
+            raise ValueError(
+                "coala_objective must be 'selfish' or 'welfare' for the "
+                f"one-head COALA-PG runner, got {self.objective!r}."
+            )
 
         # ---- VMAP env over num_envs, then num_opps ----
         env.batch_reset = jax.vmap(env.reset, (0, None), 0)
@@ -283,10 +289,17 @@ class CoalaPGRunner:
             ep_rewards_1 = traj_1.rewards.sum(axis=1).mean(axis=(1, 2))
             ep_rewards_2 = traj_2.rewards.sum(axis=1).mean(axis=(1, 2))
 
-            # COALA-PG update over the whole meta-trajectory on the shaper's
-            # OWN reward (the paper's selfish objective). The welfare and
-            # constrained objectives live in `runner_coala_pg_lagrangian`.
-            long_traj_1 = to_long_trajectory(traj_1)
+            # COALA-PG update over the whole meta-trajectory. The paper
+            # baseline is selfish (r_s); the one-head welfare ablation uses
+            # the same agent/network and swaps only the meta-objective to
+            # r_s + r_o. The constrained welfare objective lives in
+            # `runner_coala_pg_lagrangian`.
+            update_traj_1 = traj_1
+            if self.objective == "welfare":
+                update_traj_1 = traj_1._replace(
+                    rewards=traj_1.rewards + traj_2.rewards
+                )
+            long_traj_1 = to_long_trajectory(update_traj_1)
             a1_state, a1_mem, a1_metrics = agent1.update(
                 long_traj_1, obs1, a1_state, a1_mem
             )
@@ -331,6 +344,7 @@ class CoalaPGRunner:
         print(f"Co-player batch (B = num_envs): {self.args.num_envs}")
         print(f"Independent co-players (num_opps): {self.args.num_opps}")
         print(f"Log interval: {log_interval}")
+        print(f"Meta-objective: {self.objective}")
 
         for i in range(num_iters):
             rng, rng_run = jax.random.split(rng, 2)
@@ -400,6 +414,12 @@ class CoalaPGRunner:
                 wandb.log(
                     {
                         "train_iteration": i,
+                        "train/coala_objective/selfish": float(
+                            self.objective == "selfish"
+                        ),
+                        "train/coala_objective/welfare": float(
+                            self.objective == "welfare"
+                        ),
                         "train/reward_per_episode/player_1": mean_return_1,
                         "train/reward_per_episode/player_2": mean_return_2,
                         "train/reward_per_timestep/player_1": (
