@@ -53,15 +53,15 @@ fi
 case "$CONDITION" in
     selfish)
         EXPERIMENT_NAME="eval_selfish_coala_pg_v_tabular"
-        DEFAULT_CHECKPOINTS="13992,14012,67655"
+        DEFAULT_CHECKPOINTS="13992,14002,14012,24343,44545,67655"
         ;;
     welfare|unconstrained)
         EXPERIMENT_NAME="eval_welfare_coala_pg_v_tabular"
-        DEFAULT_CHECKPOINTS="14012,24343,67655"
+        DEFAULT_CHECKPOINTS="13992,14002,14012,24343,44545,67655"
         ;;
     constrained|lagrangian)
         EXPERIMENT_NAME="eval_lagrangian_coala_pg_v_tabular"
-        DEFAULT_CHECKPOINTS="14002,24343,67655"
+        DEFAULT_CHECKPOINTS="13992,14002,14012,24343,44545,67655"
         ;;
     *)
         echo "Unknown condition '$CONDITION'. Use: selfish | welfare | constrained" >&2

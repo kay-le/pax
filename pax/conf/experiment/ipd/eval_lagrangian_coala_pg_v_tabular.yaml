@@ -58,17 +58,29 @@ model_path: "SET_ME"
 # selects checkpoints[str(checkpoint_seed or seed)] and overrides the
 # run_path/model_path defaults above.
 checkpoints:
+  '13992':
+    run_path: lichenqi-university-of-regina/ipd/kp616x9z
+    model_path: exp/128-15-15constrained-CoalaPGLagrangian-vs-CoalaA2C/run-seed-13992/2026-10-06_23.24.53.369516/iteration_5000
+    max_iteration: 5000
   '14002':
-    run_path: lichenqi-university-of-regina/ipd/2id097xq
-    model_path: exp/64_20-17.5constrained-CoalaPGLagrangian-vs-CoalaA2C/run-seed-14002/2026-10-06_12.10.36.163645/iteration_5000
+    run_path: lichenqi-university-of-regina/ipd/ujir9kdv
+    model_path: exp/128-15-15constrained-CoalaPGLagrangian-vs-CoalaA2C/run-seed-14002/2026-10-06_23.24.53.369528/iteration_5000
+    max_iteration: 5000
+  '14012':
+    run_path: lichenqi-university-of-regina/ipd/bwj1z5hy
+    model_path: exp/128-15-15constrained-CoalaPGLagrangian-vs-CoalaA2C/run-seed-14012/2026-10-06_23.24.53.447820/iteration_5000
     max_iteration: 5000
   '24343':
-    run_path: lichenqi-university-of-regina/ipd/iioqg9cj
-    model_path: exp/64_20-17.5constrained-CoalaPGLagrangian-vs-CoalaA2C/run-seed-24343/2026-10-06_12.16.12.343579/iteration_5000
+    run_path: lichenqi-university-of-regina/ipd/x5tdti8b
+    model_path: exp/128-15-15constrained-CoalaPGLagrangian-vs-CoalaA2C/run-seed-24343/2026-10-06_23.24.53.374937/iteration_5000
+    max_iteration: 5000
+  '44545':
+    run_path: lichenqi-university-of-regina/ipd/sly0ilcy
+    model_path: exp/128-15-15constrained-CoalaPGLagrangian-vs-CoalaA2C/run-seed-44545/2026-10-06_23.24.53.451861/iteration_5000
     max_iteration: 5000
   '67655':
-    run_path: lichenqi-university-of-regina/ipd/f5mjhjes
-    model_path: exp/64_20-17.5constrained-CoalaPGLagrangian-vs-CoalaA2C/run-seed-67655/2026-10-06_12.18.49.071460/iteration_5000
+    run_path: lichenqi-university-of-regina/ipd/76nj91e9
+    model_path: exp/128-15-15constrained-CoalaPGLagrangian-vs-CoalaA2C/run-seed-67655/2026-10-06_23.24.53.495755/iteration_5000
     max_iteration: 5000
 
 # Constraint reference values. Keep these equal to the training values so eval
@@ -82,8 +94,8 @@ checkpoints:
 # checkpoint. The PID gains are irrelevant here -- no dual update runs during
 # eval -- but the parser supplies defaults for them.
 welfare:
-  v_ref_shaper: -20.0
-  v_ref_opponent: -17.5
+  v_ref_shaper: -15.0
+  v_ref_opponent: -15.0
   constrain_shaper: True
   constrain_opponent: True
 

@@ -63,39 +63,46 @@ model_path: "SET_ME"
 # run_path/model_path defaults above.
 checkpoints:
   '13992':
-    run_path: lichenqi-university-of-regina/ipd/o1qvah7k
-    model_path: exp/64selfish-CoalaPG-vs-CoalaA2C/run-seed-13992/2026-10-06_14.44.58.022853/iteration_3000
-    max_iteration: 3000
+    run_path: lichenqi-university-of-regina/ipd/2g027z2l
+    model_path: exp/128selfish-CoalaPG-vs-CoalaA2C/run-seed-13992/2026-10-06_22.13.56.269408/iteration_5000
+    max_iteration: 5000
+  '14002':
+    run_path: lichenqi-university-of-regina/ipd/832kmcjc
+    model_path: exp/128selfish-CoalaPG-vs-CoalaA2C/run-seed-14002/2026-10-06_22.13.56.273932/iteration_5000
+    max_iteration: 5000
   '14012':
-    run_path: lichenqi-university-of-regina/ipd/hhif0tuk
-    model_path: exp/64selfish-CoalaPG-vs-CoalaA2C/run-seed-14012/2026-10-06_14.45.23.151063/iteration_3000
-    max_iteration: 3000
+    run_path: lichenqi-university-of-regina/ipd/p6bw6bw8
+    model_path: exp/128selfish-CoalaPG-vs-CoalaA2C/run-seed-14012/2026-10-06_22.13.56.274197/iteration_5000
+    max_iteration: 5000
+  '24343':
+    run_path: lichenqi-university-of-regina/ipd/tmo49q2v
+    model_path: exp/128selfish-CoalaPG-vs-CoalaA2C/run-seed-24343/2026-10-06_22.13.56.396358/iteration_5000
+    max_iteration: 5000
+  '44545':
+    run_path: lichenqi-university-of-regina/ipd/76w65wqr
+    model_path: exp/128selfish-CoalaPG-vs-CoalaA2C/run-seed-44545/2026-10-06_22.13.56.269828/iteration_5000
+    max_iteration: 5000
   '67655':
-    run_path: lichenqi-university-of-regina/ipd/9z63hfe6
-    model_path: exp/64selfish-CoalaPG-vs-CoalaA2C/run-seed-67655/2026-10-06_14.51.14.510189/iteration_3000
-    max_iteration: 3000
+    run_path: lichenqi-university-of-regina/ipd/s6rqjjwh
+    model_path: exp/128selfish-CoalaPG-vs-CoalaA2C/run-seed-67655/2026-10-06_22.13.56.356407/iteration_5000
+    max_iteration: 5000
 
-# IR reference values. -20.0 is each player's security level (the
-# mutual-defection payoff at T=10), which makes the logged slack exactly the
-# individual-rationality margin. Keep these equal to the training values so
-# eval slack and training slack mean the same thing.
+# Reference values for eval slack. These match the constrained COALA-PG
+# training floors so eval slack is directly comparable across selfish /
+# welfare / constrained. Raw returns are logged too, so other reference
+# values can be applied afterwards.
 #
 # This agent has no constraints; the block exists only so the eval runner can
-# report IR slack on the SAME reference values as the other two conditions.
+# report slack on the SAME reference values as the other two conditions.
 # For the selfish shaper the interesting slack is the CO-PLAYER's: a selfish
-# shaper that exploits drives R_o below -20.
+# shaper that exploits drives R_o down toward the co-player's security level
+# (-20, mutual defection at T=10), i.e. well below the -15 floor used here, so
+# expect a strongly negative slack_opponent. Note -15 is NOT the security
+# level: slack >= 0 against it is a stricter condition than individual
+# rationality.
 welfare:
-  # Matched to the CONSTRAINED condition's training floors (-20 shaper,
-  # -17.5 co-player) and identical in all three eval configs, so the logged
-  # slack is directly comparable across selfish / welfare / constrained.
-  # Raw returns are logged too (eval/per_episode/reward/player_{1,2}), so any
-  # other yardstick can be applied afterwards -- slack is just return - v_ref.
-  #
-  # -20 is each player's security level (mutual defection at T=10); -17.5 is
-  # 2.5 above the co-player's, so co-player slack >= 0 is a STRONGER claim
-  # than individual rationality. Say which you mean when reporting.
-  v_ref_shaper: -20.0
-  v_ref_opponent: -17.5
+  v_ref_shaper: -15.0
+  v_ref_opponent: -15.0
 
 # Shaper (agent1) -- architecture keys must match training or the checkpoint
 # will not load. hidden_size is the load-bearing one.

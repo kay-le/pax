@@ -40,32 +40,38 @@ model_path: "SET_ME"
 # selects checkpoints[str(checkpoint_seed or seed)] and overrides the
 # run_path/model_path defaults above.
 checkpoints:
+  '13992':
+    run_path: lichenqi-university-of-regina/ipd/cjbywkcj
+    model_path: exp/128unconstrained-CoalaPG-vs-CoalaA2C/run-seed-13992/2026-10-06_22.13.56.361753/iteration_5000
+    max_iteration: 5000
+  '14002':
+    run_path: lichenqi-university-of-regina/ipd/d09dfg8h
+    model_path: exp/128unconstrained-CoalaPG-vs-CoalaA2C/run-seed-14002/2026-10-06_22.13.56.274886/iteration_5000
+    max_iteration: 5000
   '14012':
-    run_path: lichenqi-university-of-regina/ipd/a4hxd967
-    model_path: exp/64unconstrained-CoalaPG-vs-CoalaA2C/run-seed-14012/2026-10-06_14.44.58.030115/iteration_5000
+    run_path: lichenqi-university-of-regina/ipd/j8cfgi6i
+    model_path: exp/128unconstrained-CoalaPG-vs-CoalaA2C/run-seed-14012/2026-10-06_22.13.56.373943/iteration_5000
     max_iteration: 5000
   '24343':
-    run_path: lichenqi-university-of-regina/ipd/iy14jc03
-    model_path: exp/64unconstrained-CoalaPG-vs-CoalaA2C/run-seed-24343/2026-10-06_14.45.23.244760/iteration_5000
+    run_path: lichenqi-university-of-regina/ipd/p0ol3y0t
+    model_path: exp/128unconstrained-CoalaPG-vs-CoalaA2C/run-seed-24343/2026-10-06_22.13.56.276783/iteration_5000
+    max_iteration: 5000
+  '44545':
+    run_path: lichenqi-university-of-regina/ipd/noxqx9b2
+    model_path: exp/128unconstrained-CoalaPG-vs-CoalaA2C/run-seed-44545/2026-10-06_22.13.56.270374/iteration_5000
     max_iteration: 5000
   '67655':
-    run_path: lichenqi-university-of-regina/ipd/fc041sor
-    model_path: exp/64unconstrained-CoalaPG-vs-CoalaA2C/run-seed-67655/2026-10-06_14.45.09.137944/iteration_5000
+    run_path: lichenqi-university-of-regina/ipd/fqqdodmh
+    model_path: exp/128unconstrained-CoalaPG-vs-CoalaA2C/run-seed-67655/2026-10-06_22.13.56.274605/iteration_5000
     max_iteration: 5000
 
-# IR reference values for eval reporting only.
+# Reference values for eval slack. These match the constrained COALA-PG
+# training floors so eval slack is directly comparable across selfish /
+# welfare / constrained. Raw returns are logged too, so other reference
+# values can be applied afterwards.
 welfare:
-  # Matched to the CONSTRAINED condition's training floors (-20 shaper,
-  # -17.5 co-player) and identical in all three eval configs, so the logged
-  # slack is directly comparable across selfish / welfare / constrained.
-  # Raw returns are logged too (eval/per_episode/reward/player_{1,2}), so any
-  # other yardstick can be applied afterwards -- slack is just return - v_ref.
-  #
-  # -20 is each player's security level (mutual defection at T=10); -17.5 is
-  # 2.5 above the co-player's, so co-player slack >= 0 is a STRONGER claim
-  # than individual rationality. Say which you mean when reporting.
-  v_ref_shaper: -20.0
-  v_ref_opponent: -17.5
+  v_ref_shaper: -15.0
+  v_ref_opponent: -15.0
 
 # Shaper (agent1) -- architecture keys must match training.
 ppo1:
