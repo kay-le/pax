@@ -35,7 +35,7 @@ save_interval: 1000
 
 # Training geometry, identical to coala_pg_v_tabular.yaml.
 num_envs: 16           # B
-num_opps: 8
+num_opps: 64           # must match the other conditions (see coala_pg_v_tabular.yaml)
 num_outer_steps: 20    # M
 num_inner_steps: 10    # T
 num_iters: 5001
@@ -54,7 +54,13 @@ ppo1:
   clip_value: True
   max_gradient_norm: 1.0
   anneal_entropy: False
-  entropy_coeff_start: 0.0
+  # 0.02, matching every other shaper agent in this repo AND the other two
+  # COALA-PG objectives. Departs from the paper's Table 8 value of 0.0
+  # deliberately: at 0.0 the softmax saturates and the policy dies (measured
+  # P(coop) = 0.000 at every state), and it MUST be identical across the
+  # selfish / welfare / constrained conditions or a difference in outcome is
+  # attributable to exploration rather than to the objective.
+  entropy_coeff_start: 0.02
   entropy_coeff_horizon: 2000000
   entropy_coeff_end: 0.001
   lr_scheduling: False
@@ -77,7 +83,11 @@ ppo2:
   clip_value: True
   max_gradient_norm: 1.0
   anneal_entropy: False
-  entropy_coeff_start: 0.02
+  # 0.0, from the paper's Table 8. The CO-PLAYER must be identical in all
+  # three conditions -- it is the agent being shaped, so changing it changes
+  # the thing being measured. This was 0.02 here and 0.0 in the other two
+  # configs, which made the welfare condition shape a different learner.
+  entropy_coeff_start: 0.0
   entropy_coeff_horizon: 2000000
   entropy_coeff_end: 0.001
   lr_scheduling: False

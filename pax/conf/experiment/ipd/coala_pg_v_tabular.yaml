@@ -46,10 +46,15 @@ save_interval: 1000
 # T=10 departs from the T=100 used by the ES baselines; report this difference
 # or re-run ES at this horizon before making direct table comparisons.
 num_envs: 16           # B
-num_opps: 8
+num_opps: 64           # independent co-players per update. 64 (not 8) because
+                       # the COALA estimator averages future-episode credit
+                       # across co-players, so this is the main variance knob;
+                       # it must be EQUAL in all three conditions. PPO batch =
+                       # M*T*num_opps*num_envs = 204800, divisible by
+                       # ppo1.num_minibatches.
 num_outer_steps: 20    # M
 num_inner_steps: 10    # T
-num_iters: 3001
+num_iters: 5001        # matched to the welfare / constrained conditions
 num_devices: 1
 
 # COALA-PG shaper (agent1).
@@ -75,7 +80,13 @@ ppo1:
   clip_value: True
   max_gradient_norm: 1.0
   anneal_entropy: False
-  entropy_coeff_start: 0.0
+  # 0.02, matching every other shaper agent in this repo AND the other two
+  # COALA-PG objectives. Departs from the paper's Table 8 value of 0.0
+  # deliberately: at 0.0 the softmax saturates and the policy dies (measured
+  # P(coop) = 0.000 at every state), and it MUST be identical across the
+  # selfish / welfare / constrained conditions or a difference in outcome is
+  # attributable to exploration rather than to the objective.
+  entropy_coeff_start: 0.02
   entropy_coeff_horizon: 2000000
   entropy_coeff_end: 0.001
   lr_scheduling: False
@@ -112,7 +123,7 @@ ppo2:
 wandb:
   entity: "lichenqi-university-of-regina"
   project: ipd
-  group: 'baseline-COALA-PG-${agent1}-vs-${agent2}'
+  group: 'selfish-${agent1}-vs-${agent2}'
   name: run-seed-${seed}
   log: True
   mode: offline

@@ -64,7 +64,7 @@ save_interval: 1000
 
 # Training (identical to coala_pg_v_tabular.yaml / the constrained ES runs)
 num_envs: 16           # B
-num_opps: 8
+num_opps: 64           # must match the other conditions (see coala_pg_v_tabular.yaml)
 num_outer_steps: 20    # M
 num_inner_steps: 10    # T
 num_iters: 5001
@@ -96,7 +96,7 @@ welfare:
   # policy from the sucker basin. Measured: 1.0 cannot (policy frozen as
   # sucker), 1.5 undershoots (1/6 seeds cooperate), 2.0 works. Higher values
   # overshoot into saturated always-D.
-  lam_max: 2.0
+  lam_max: 1.5
   #
   # COALA-PG meta-trajectory returns are noisy, and a derivative term on raw
   # noise is mostly noise. 0.9 smooths the measurement the controller sees
@@ -133,19 +133,37 @@ welfare:
   # v_ref is PER INNER EPISODE (T=10): -10 is all-CC, -20 is all-DD (each
   # player's security level).
   #
-  # -14 for both, NOT the security level -20. Measured (12 seeds each): at -20
-  # the floor is slack once cooperation is reached, so the welfare term slowly
-  # erodes the shaper's retaliation P(C|CD), the co-player starts exploiting
-  # again and the shaper drifts back toward self-sacrifice (~3/6 seeds end
-  # cooperative). -14 binds exactly where that drift starts: shaper-only -14
-  # gives 8/12 seeds >= 50% cooperative over the last 2000 iterations and
-  # 0/12 sucker; -14 on both gives 10/12 reaching cooperation. Say so when
-  # reporting: -14 is halfway between mutual cooperation and mutual
-  # defection, a stricter floor than individual rationality.
+  # CURRENT SETTING: -20 for the shaper (its security level, i.e. individual
+  # rationality) and -17.5 for the co-player (2.5 ABOVE its security level, so
+  # a strictly stronger demand than IR -- the shaper must leave the learner
+  # better off than mutual defection, not merely no worse). This asymmetry is
+  # deliberate; do NOT describe both constraints as "individual rationality"
+  # when reporting.
   #
-  #   ++welfare.v_ref_shaper=-20 ++welfare.v_ref_opponent=-20   # IR floors
-  v_ref_shaper: -14.0
-  v_ref_opponent: -14.0
+  # PRIOR MEASUREMENT, kept because it is not recoverable from the code.
+  # 12 seeds per setting:
+  #   -20 / -20  : the shaper's floor goes slack once cooperation is reached,
+  #                so the welfare term slowly erodes its retaliation
+  #                P(C|CD), the co-player starts exploiting again, and the
+  #                shaper drifts back toward self-sacrifice. ~3/6 seeds ended
+  #                cooperative.
+  #   -14 / -14  : binds exactly where that drift starts -- 10/12 seeds
+  #                reached cooperation. Shaper-only -14 gave 8/12 >= 50%
+  #                cooperative over the last 2000 iterations and 0/12 sucker.
+  #                -14 is halfway between mutual cooperation and mutual
+  #                defection, a stricter floor than IR.
+  #
+  # NOTE the tension: -20 on the SHAPER is the setting measured above as
+  # slack-and-drifting. The -17.5 co-player floor does not fix that directly
+  # -- it binds on the co-player, raising lam_o, which weights the co-player
+  # MORE and so pushes the shaper to be nicer, the opposite of preserving
+  # retaliation. Watch P(coop|CD) over the last 2000 iterations; if it rises
+  # and the shaper's return falls, this is that drift and -14 on the shaper is
+  # the known fix.
+  #
+  #   ++welfare.v_ref_shaper=-14 ++welfare.v_ref_opponent=-14   # prior best
+  v_ref_shaper: -20.0
+  v_ref_opponent: -17.5
 
   # ---- dropping a constraint (ablation) ----
   #
