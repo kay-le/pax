@@ -46,12 +46,16 @@ save_interval: 1000
 # T=10 departs from the T=100 used by the ES baselines; report this difference
 # or re-run ES at this horizon before making direct table comparisons.
 num_envs: 16           # B
-num_opps: 64           # independent co-players per update. 64 (not 8) because
-                       # the COALA estimator averages future-episode credit
-                       # across co-players, so this is the main variance knob;
-                       # it must be EQUAL in all three conditions. PPO batch =
-                       # M*T*num_opps*num_envs = 204800, divisible by
+num_opps: 128          # independent co-players per update = the paper's
+                       # `meta_batch_size` (Table 2). The COALA estimator
+                       # averages future-episode credit across co-players, so
+                       # this is the main variance knob; it must be EQUAL in
+                       # all three conditions. PPO batch =
+                       # M*T*num_opps*num_envs = 409600, divisible by
                        # ppo1.num_minibatches.
+# Paper Table 2 `population_size (naive)`: the co-player is re-initialised from
+# a fixed pool of this many parameter vectors (0 = fresh random init each time).
+naive_population_size: 10
 num_outer_steps: 20    # M
 num_inner_steps: 10    # T
 num_iters: 5001        # matched to the welfare / constrained conditions

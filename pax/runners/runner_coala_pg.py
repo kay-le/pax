@@ -127,6 +127,24 @@ class CoalaPGRunner:
             a2_rng, jnp.tile(agent2._mem.hidden, (args.num_opps, 1, 1))
         )
 
+        # Naive-learner population (paper, App. B.2.2 and Table 2,
+        # `population_size (naive)` = 10, `dynamic_naive_agents` = False): the
+        # co-player is always (re-)initialised from a FIXED set of
+        # `naive_population_size` parameter vectors, sampled uniformly with
+        # replacement for each of the num_opps co-players of a meta-trajectory.
+        # Sampling a brand-new initialisation every time (the previous
+        # behaviour, `naive_population_size: 0`) widens the task distribution
+        # the shaper has to cover and is not what the paper trained against.
+        naive_pop = int(args.get("naive_population_size", 10))
+        self._naive_pool_keys = (
+            jax.random.split(
+                jax.random.PRNGKey(args.seed + 7919), naive_pop
+            )
+            if naive_pop > 0
+            else None
+        )
+        pool_keys = self._naive_pool_keys
+
         def _inner_rollout(carry, unused):
             """One step of an inner episode."""
             (
@@ -251,7 +269,13 @@ class CoalaPGRunner:
             # Fresh shaper memory, and a freshly initialised co-player: the
             # shaper must shape learning from scratch each meta-trajectory.
             _a1_mem = agent1.batch_reset(_a1_mem, False)
-            a2_rng = jax.random.split(_rng_run, args.num_opps)
+            if pool_keys is None:
+                a2_rng = jax.random.split(_rng_run, args.num_opps)
+            else:
+                idx = jax.random.randint(
+                    _rng_run, (args.num_opps,), 0, pool_keys.shape[0]
+                )
+                a2_rng = pool_keys[idx]
             _a2_state, _a2_mem = agent2.batch_init(a2_rng, _a2_mem.hidden)
 
             vals, stack = jax.lax.scan(

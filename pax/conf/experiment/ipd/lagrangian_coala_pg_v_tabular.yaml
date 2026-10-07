@@ -64,7 +64,11 @@ save_interval: 1000
 
 # Training (identical to coala_pg_v_tabular.yaml / the constrained ES runs)
 num_envs: 16           # B
-num_opps: 64           # must match the other conditions (see coala_pg_v_tabular.yaml)
+num_opps: 128          # paper Table 2 `meta_batch_size`; must match the other
+                       # conditions (see coala_pg_v_tabular.yaml)
+# Paper Table 2 `population_size (naive)`: the co-player is re-initialised from
+# a fixed pool of this many parameter vectors (0 = fresh random init each time).
+naive_population_size: 10
 num_outer_steps: 20    # M
 num_inner_steps: 10    # T
 num_iters: 5001
