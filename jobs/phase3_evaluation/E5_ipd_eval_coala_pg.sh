@@ -8,7 +8,7 @@
 # read off.
 #
 # Usage:
-#   bash E5_ipd_eval_coala_pg.sh <platform> <condition> [num_seeds|seed_csv] [seed_start] [wandb_mode]
+#   bash E5_ipd_eval_coala_pg.sh <platform> <condition> [num_seeds|seed_csv] [seed_start] [wandb_mode] [hydra_overrides...]
 #
 # condition: selfish | welfare | constrained
 # aliases: unconstrained -> welfare, lagrangian -> constrained
@@ -33,6 +33,8 @@
 #   bash E5_ipd_eval_coala_pg.sh fir welfare 5 100
 #   # non-contiguous training/checkpoint seeds from the eval YAML checkpoint map
 #   bash E5_ipd_eval_coala_pg.sh fir constrained 13992,14002,14012,24343,44545,67655
+#   # same checkpoint list, but evaluate 64 fresh co-players per checkpoint
+#   bash E5_ipd_eval_coala_pg.sh fir constrained 14002,24343,67655 online ++num_opps=64
 #   # smoke test
 #   bash E5_ipd_eval_coala_pg.sh tri-debug constrained
 #
@@ -48,10 +50,16 @@ if [[ "$SEEDS_ARG" == *,* ]]; then
     NUM_SEEDS=${#SEED_LIST[@]}
     SEED_START=${SEED_LIST[0]}
     WANDB_MODE_ARG=${4:-online}
+    if [ "$#" -ge 5 ]; then
+        EXTRA_OVERRIDES=("${@:5}")
+    fi
 else
     NUM_SEEDS=$SEEDS_ARG
     SEED_START=${4:-0}
     WANDB_MODE_ARG=${5:-online}
+    if [ "$#" -ge 6 ]; then
+        EXTRA_OVERRIDES=("${@:6}")
+    fi
     SEED_LIST=()
     for ((offset=0; offset<NUM_SEEDS; offset++)); do
         SEED_LIST+=($((SEED_START + offset)))
@@ -149,6 +157,9 @@ else
     echo "  seeds     : ${SEED_START}..${SEED_END}  ($NUM_SEEDS fresh co-players)"
 fi
 echo "  wandb     : $WANDB_MODE_ARG"
+if [ "${#EXTRA_OVERRIDES[@]}" -gt 0 ]; then
+    echo "  overrides : ${EXTRA_OVERRIDES[*]}"
+fi
 echo "  started   : $(date '+%Y-%m-%d %H:%M:%S')"
 echo
 
@@ -183,6 +194,7 @@ case "$PLATFORM" in
             seed=$SEED_START \
             ++num_outer_steps=5 \
             ++wandb.mode=$WANDB_MODE_ARG \
+            "${EXTRA_OVERRIDES[@]}" \
             hydra.run.dir=$HYDRA_DIR
         ;;
 esac
