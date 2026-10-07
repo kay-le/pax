@@ -94,7 +94,7 @@ ppo2:
   clip_value: True
   max_gradient_norm: 1.0
   anneal_entropy: False
-  entropy_coeff_start: 0.0
+  entropy_coeff_start: 0.02
   entropy_coeff_horizon: 2000000
   entropy_coeff_end: 0.001
   lr_scheduling: False

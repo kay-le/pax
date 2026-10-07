@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # Unified launcher for E5 IPD COALA-PG evaluation.
 #
 # Evaluates the trained shaper checkpoint specified in the selected eval YAML
