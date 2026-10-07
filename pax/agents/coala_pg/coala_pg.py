@@ -382,13 +382,24 @@ def coala_advantages(
     Returns:
       ``[B, L]`` advantages.
     """
-    # V_{t+1}, with the bootstrap appended and zeroed at inner-episode ends:
-    # each inner episode is a fresh game, so no value leaks across its boundary.
+    # V_{t+1} with the bootstrap appended. The inner-episode `dones` are
+    # deliberately IGNORED (paper, App. B.2.1: "Crucially, the done signals
+    # from the inner episodes are ignored"): the critic is the long-horizon
+    # value of Eq. 10, which sums ALL remaining inner episodes, so the TD
+    # error at an inner-episode boundary must bootstrap from the value at the
+    # start of the next episode. Masking it there (the previous behaviour)
+    # subtracted the whole remaining-meta-episode value once per boundary
+    # instead of letting it telescope, leaving every advantage with an offset
+    # of order sum_{future episodes} V(episode start) -- hundreds of reward
+    # units against a signal of order one. Verified against Eq. 13-14 on a
+    # toy problem: ignoring dones matches to 1e-7, masking does not. Only the
+    # meta-trajectory's final step has no successor; the runner passes that
+    # bootstrap as 0.
+    del dones
     next_values = jnp.concatenate(
         [values[:, 1:], bootstrap_value[:, None]], axis=1
     )
-    not_done = 1.0 - dones.astype(rewards.dtype)
-    deltas = rewards + gamma * not_done * next_values - values
+    deltas = rewards + gamma * next_values - values
 
     return batch_lambda_returns(
         rewards=deltas,
