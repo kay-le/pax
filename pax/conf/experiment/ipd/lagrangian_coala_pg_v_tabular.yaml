@@ -96,7 +96,7 @@ welfare:
   # policy from the sucker basin. Measured: 1.0 cannot (policy frozen as
   # sucker), 1.5 undershoots (1/6 seeds cooperate), 2.0 works. Higher values
   # overshoot into saturated always-D.
-  lam_max: 1.5
+  lam_max: 2
   #
   # COALA-PG meta-trajectory returns are noisy, and a derivative term on raw
   # noise is mostly noise. 0.9 smooths the measurement the controller sees
