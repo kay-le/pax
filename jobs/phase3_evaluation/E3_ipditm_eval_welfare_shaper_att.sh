@@ -32,7 +32,7 @@ if [ -z "$SLURM_JOB_ID" ]; then
                 --gpus=nvidia_h100_80gb_hbm3_3g.40gb:1 \
                 --cpus-per-task=2 \
                 --mem=10G \
-                --time=1:40:00 \
+                --time=2:00:00 \
                 --output=/scratch/lichenqi/eval/output/%x-%N-%j.out \
                 "$0" "$@"
             ;;
@@ -89,9 +89,9 @@ export WANDB__SERVICE_WAIT=180
 export WANDB_INIT_TIMEOUT=180
 export WANDB_START_METHOD=thread
 
-EXPERIMENT="ipditm=meta_eval_mfos"
+EXPERIMENT="ipditm=eval_welfare_shaper_att"
 HYDRA_DIR="$TMPDIR/hydra_output"
-NUM_SEEDS=35
+NUM_SEEDS=100
 
 start_time=$(date +%s)
 echo "=== Platform: $PLATFORM | Seed: $SEED | $(date '+%Y-%m-%d %H:%M:%S') ==="
